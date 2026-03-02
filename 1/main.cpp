@@ -51,6 +51,29 @@ StringTable<8> constexpr group_2_table {
     "inc", "dec", "call", "call", "jmp", "jmp", "push", "ERR",
 };
 
+std::string constexpr get_mnemonic( unsigned char const * const instruction ) {
+    switch ( *instruction ) {
+    case 0x80:
+    case 0x81:
+    case 0x82:
+    case 0x83:
+        return immediate_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    case 0xd0:
+    case 0xd1:
+    case 0xd2:
+    case 0xd3:
+        return shift_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    case 0xf6:
+    case 0xf7:
+        return group_1_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    case 0xfe:
+    case 0xff:
+        return group_2_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    default:
+        return mnemonics[*instruction];
+    }
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Utility functions and arrays
@@ -358,25 +381,14 @@ std::string jump_conditional( unsigned char const *& instruction ) {
     if ( (*instruction & opcode_masks[first_bit]) != opcodes[first_bit] )
         return "";
 
-    std::string const mnemonic { jumps[16 * first_bit + (*instruction & index_masks[first_bit])] };
+    std::string const mnemonic { get_mnemonic( instruction ) };
     int const offset { get_value( ++instruction, false, true ) };
     return std::format( "{} ${:+}", mnemonic, offset + 2 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Unary (I suppose) operations
+/// Group 2 operations
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-StringTable<8> constexpr unary_mnemonics { // Only for the opcode 1111111
-    "inc",
-    "dec",
-    "call",
-    "call",
-    "jmp",
-    "jmp",
-    "push",
-    "<ERROR>",
-};
 
 std::string unary_r_m( unsigned char const *& instruction ) {
     struct Instruction {
@@ -388,9 +400,38 @@ std::string unary_r_m( unsigned char const *& instruction ) {
         unsigned char subop : 3;
         unsigned char mod : 2;
     };
-    auto const values { *reinterpret_cast<Instruction const *>( instruction ) };
+    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
 
-    return "";
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    instruction += sizeof( Instruction );
+    std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+
+    return std::format( "{} {}", mnemonic, r_m );
+}
+
+std::string push_pop_reg( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char reg : 3;
+        unsigned char opcode : 5;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    ++instruction;
+    return std::format( "{} {}", mnemonic, reg_names[0b0000'1000 | header->reg] );
+}
+
+std::string push_pop_seg_reg( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char op1 : 3;
+        unsigned char seg_reg : 2;
+        unsigned char op2 : 3;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    ++instruction;
+    return std::format( "{} {}", mnemonic, seg_reg_names[header->seg_reg] );
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -402,11 +443,15 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
 
     for ( unsigned char j { 0 }; j < (1 << 3); ++j ) {
         unsigned char const subop ( j << 3 );
-        for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 00jjj000 , 00jjj011 ]
+        for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 00___000 , 00___011 ]
             table[0b0000'0000 | i | subop] = arithmetic_register_r_m;
-        for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 00jjj010 , 00jjj101 ]
+        for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 00___010 , 00___101 ]
             table[0b0000'0100 | i | subop] = arithmetic_accumulator;
     }
+    for ( unsigned char i { 0 }; i < (1 << 3); ++i ) // [ 000__110 , 000__111 ]
+        table[0b0000'0110 | i | (i << 2)] = push_pop_seg_reg;
+    for ( unsigned char i { 0 }; i < (1 << 4); ++i ) // [ 01010000 , 01011111 ]
+        table[0b0101'0000 | i] = push_pop_reg;
     for ( unsigned char i { 0 }; i < (1 << 4); ++i ) // [ 01110000 , 01111111 ]
         table[0b0111'0000 | i] = jump_conditional;
     for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 11100000 , 11100011 ]
