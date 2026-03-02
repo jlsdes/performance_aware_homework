@@ -447,44 +447,103 @@ std::string exchange_reg_imm( unsigned char const *& instruction ) {
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// Input / output
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+std::string in_out( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char w : 1;
+        unsigned char d : 1;
+        unsigned char one : 1;
+        unsigned char variable : 1;
+        unsigned char opcode : 4;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    if ( header->opcode != 0b1110 or header->one != 1 )
+        return "";
+
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    instruction += sizeof( HeaderByte );
+    std::string destination { header->w ? "ax" : "al" };
+    std::string source { header->variable ? "dx" : std::to_string( get_value( instruction, false, false ) ) };
+    if ( header->d )
+        std::swap( destination, source );
+
+    return std::format( "{} {}, {}", mnemonic, destination, source );
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// General decoding
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr decoding_table() {
     std::array<std::function<std::string(unsigned char const *&)>, 256> table { nullptr };
 
+    // 00___0__
+    // 00___10_
     for ( unsigned char j { 0 }; j < (1 << 3); ++j ) {
         unsigned char const subop ( j << 3 );
-        for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 00___000 , 00___011 ]
+        for ( unsigned char i { 0 }; i < (1 << 2); ++i )
             table[0b0000'0000 | i | subop] = arithmetic_register_r_m;
-        for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 00___010 , 00___101 ]
+        for ( unsigned char i { 0 }; i < (1 << 1); ++i )
             table[0b0000'0100 | i | subop] = arithmetic_accumulator;
     }
-    for ( unsigned char i { 0 }; i < (1 << 3); ++i ) // [ 000__110 , 000__111 ]
+    // 000__11_
+    for ( unsigned char i { 0 }; i < (1 << 3); ++i )
         table[0b0000'0110 | i | (i << 2)] = push_pop_seg_reg;
-    for ( unsigned char i { 0 }; i < (1 << 4); ++i ) // [ 01010000 , 01011111 ]
+    // 0101____
+    for ( unsigned char i { 0 }; i < (1 << 4); ++i )
         table[0b0101'0000 | i] = push_pop_reg;
-    for ( unsigned char i { 0 }; i < (1 << 4); ++i ) // [ 01110000 , 01111111 ]
+    // 0111____
+    for ( unsigned char i { 0 }; i < (1 << 4); ++i )
         table[0b0111'0000 | i] = jump_conditional;
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 11100000 , 11100011 ]
-        table[0b1110'0000 | i] = jump_conditional;
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 10000000 , 10000011 ]
+    // 100000__
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1000'0000 | i] = arithmetic_immediate_r_m;
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 10000110 , 10000111 ]
+    // 1000011_
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1000'0110 | i] = exchange_reg_r_m;
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 10001000 , 10001011 ]
+    // 100010__
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1000'1000 | i] = move_register_r_m;
-    table[0b1000'1111] = unary_r_m;                  // [ 10001111 ]
-    for ( unsigned char i { 0 }; i < (1 << 3); ++i ) // [ 10010000 , 10010111 ]
+    // 10001111
+    table[0b1000'1111] = unary_r_m;
+    // 10010___
+    for ( unsigned char i { 0 }; i < (1 << 3); ++i )
         table[0b1001'0000 | i] = exchange_reg_imm;
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 10100000 , 10100011 ]
+    // 101000__
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1010'0000 | i] = move_accumulator;
-    for ( unsigned char i { 0 }; i < (1 << 4); ++i ) // [ 10110000 , 10111111 ]
+    // 1011____
+    for ( unsigned char i { 0 }; i < (1 << 4); ++i )
         table[0b1011'0000 | i] = move_immediate_reg;
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 11000110 , 11000111 ]
+    // 1100011_
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1100'0110 | i] = move_immediate_r_m;
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 11111110 , 11111111 ]
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
+        table[0b1110'0000 | i] = jump_conditional;
+    // 1110_1__
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
+        for ( unsigned char j { 0 }; j < (1 << 1); ++j )
+            table[0b1110'0100 | i | (j << 3)] = in_out;
+    // 1111111_
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1111'1110 | i] = unary_r_m;
+
+#if (0)
+    std::println( "Current table status:" );
+    std::println( "+----------------+" );
+    for ( unsigned int row { 0 }; row < 16; ++row ) {
+        std::print( "|" );
+        for ( unsigned int col { 0 }; col < 16; ++col ) {
+            unsigned int const index { row << 4 | col };
+            std::print( "{}", (table[index] ? '#' : ' ') );
+        }
+        std::println( "|" );
+    }
+    std::println( "+----------------+" );
+#endif
 
     return table;
 };
