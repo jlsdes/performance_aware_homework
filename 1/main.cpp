@@ -154,7 +154,7 @@ std::string get_r_m_name( unsigned char const r_m,
 };
 
 
-std::string decode_r_m_to_reg( unsigned char const *& instruction ) {
+std::string _decode_r_m_to_reg( unsigned char const *& instruction, bool const force_swap = false ) {
     struct Instruction {
         // First byte
         unsigned char w : 1;
@@ -166,14 +166,23 @@ std::string decode_r_m_to_reg( unsigned char const *& instruction ) {
         unsigned char mod : 2;
     };
     auto const values { reinterpret_cast<Instruction const *>( instruction ) };
-    instruction += sizeof( Instruction );
 
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    instruction += sizeof( Instruction );
     std::string source { reg_names[(values->w << 3) | values->reg] };
     std::string destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
-    if ( values->d )
+    if ( force_swap or values->d )
         std::swap( source, destination );
 
-    return std::format( "{}, {}", destination, source );
+    return std::format( "{} {}, {}", mnemonic, destination, source );
+}
+
+std::string decode_r_m_to_reg( unsigned char const *& instruction ) {
+    return _decode_r_m_to_reg( instruction, false );
+}
+
+std::string decode_r_m_to_reg_swap( unsigned char const *& instruction ) {
+    return _decode_r_m_to_reg( instruction, true );
 }
 
 
@@ -226,24 +235,14 @@ std::string decode_imm_to_accum( unsigned char const *& instruction ) {
     return std::format( "{}, {}", destination, source );
 }
 
+
+std::string decode_only_mnemonic( unsigned char const *& instruction ) {
+    return get_mnemonic( instruction++ );
+};
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Move instructions
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-std::string move_register_r_m( unsigned char const *& instruction ) {
-    struct HeaderByte {
-        unsigned char w : 1;
-        unsigned char d : 1;
-        unsigned char opcode : 6;
-    };
-    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
-
-    if ( header->opcode != 0b100010 )
-        return "";
-
-    return std::format( "mov {}", decode_r_m_to_reg( instruction ) );
-}
-
 
 std::string move_immediate_reg( unsigned char const *& instruction ) {
     struct Instruction {
@@ -296,23 +295,6 @@ std::string move_accumulator( unsigned char const *& instruction ) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Arithmetic instructions
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-std::string arithmetic_register_r_m( unsigned char const *& instruction ) {
-    struct HeaderByte {
-        unsigned char w : 1;
-        unsigned char d : 1;
-        unsigned char op1 : 1;
-        unsigned char subop : 3;
-        unsigned char op2 : 2;
-    };
-    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
-
-    if ( header->op1 != 0b0 and header->op2 != 0b00 )
-        return "";
-
-    return std::format( "{} {}", get_mnemonic( instruction ), decode_r_m_to_reg( instruction ) );
-}
-
 
 std::string arithmetic_immediate_r_m( unsigned char const *& instruction ) {
     struct Instruction {
@@ -371,7 +353,7 @@ std::string jump_conditional( unsigned char const *& instruction ) {
 /// Group 2 operations
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-std::string unary_r_m( unsigned char const *& instruction ) {
+std::string group_2_r_m( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
         unsigned char w : 1;
@@ -390,6 +372,7 @@ std::string unary_r_m( unsigned char const *& instruction ) {
     return std::format( "{} word {}", mnemonic, r_m );
 }
 
+
 std::string push_pop_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char reg : 3;
@@ -401,6 +384,7 @@ std::string push_pop_reg( unsigned char const *& instruction ) {
     ++instruction;
     return std::format( "{} {}", mnemonic, reg_names[0b0000'1000 | header->reg] );
 }
+
 
 std::string push_pop_seg_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
@@ -418,19 +402,6 @@ std::string push_pop_seg_reg( unsigned char const *& instruction ) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Exchange
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-std::string exchange_reg_r_m( unsigned char const *& instruction ) {
-    struct HeaderByte {
-        unsigned char w : 1;
-        unsigned char opcode : 7;
-    };
-    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
-
-    if ( header->opcode != 0b100'0011 )
-        return "";
-
-    return std::format( "xchg {}", decode_r_m_to_reg( instruction ) );
-}
 
 std::string exchange_reg_imm( unsigned char const *& instruction ) {
     struct HeaderByte {
@@ -485,7 +456,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     for ( unsigned char j { 0 }; j < (1 << 3); ++j ) {
         unsigned char const subop ( j << 3 );
         for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-            table[0b0000'0000 | i | subop] = arithmetic_register_r_m;
+            table[0b0000'0000 | i | subop] = decode_r_m_to_reg;
         for ( unsigned char i { 0 }; i < (1 << 1); ++i )
             table[0b0000'0100 | i | subop] = arithmetic_accumulator;
     }
@@ -503,24 +474,35 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b1000'0000 | i] = arithmetic_immediate_r_m;
     // 1000011_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1000'0110 | i] = exchange_reg_r_m;
+        table[0b1000'0110 | i] = decode_r_m_to_reg;
     // 100010__
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1000'1000 | i] = move_register_r_m;
+        table[0b1000'1000 | i] = decode_r_m_to_reg;
+    // 10001101
+    table[0b1000'1101] = decode_r_m_to_reg_swap;
     // 10001111
-    table[0b1000'1111] = unary_r_m;
+    table[0b1000'1111] = group_2_r_m;
     // 10010___
     for ( unsigned char i { 0 }; i < (1 << 3); ++i )
         table[0b1001'0000 | i] = exchange_reg_imm;
+    // 100111__
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
+        table[0b1001'1100 | i] = decode_only_mnemonic;
     // 101000__
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1010'0000 | i] = move_accumulator;
     // 1011____
     for ( unsigned char i { 0 }; i < (1 << 4); ++i )
         table[0b1011'0000 | i] = move_immediate_reg;
+    // 1100010_
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
+        table[0b1100'0100 | i] = decode_r_m_to_reg_swap;
     // 1100011_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1100'0110 | i] = move_immediate_r_m;
+    // 11010111
+    table[0b1101'0111] = decode_only_mnemonic;
+    // 111000__
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1110'0000 | i] = jump_conditional;
     // 1110_1__
@@ -529,20 +511,21 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
             table[0b1110'0100 | i | (j << 3)] = in_out;
     // 1111111_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1111'1110 | i] = unary_r_m;
+        table[0b1111'1110 | i] = group_2_r_m;
 
-#if (0)
-    std::println( "Current table status:" );
-    std::println( "+----------------+" );
+#if ( true )
+    std::println( "; Current table status:" );
+    std::println( "; +----------------+" );
     for ( unsigned int row { 0 }; row < 16; ++row ) {
-        std::print( "|" );
+        std::print( "; |" );
         for ( unsigned int col { 0 }; col < 16; ++col ) {
             unsigned int const index { row << 4 | col };
             std::print( "{}", (table[index] ? '#' : ' ') );
         }
         std::println( "|" );
     }
-    std::println( "+----------------+" );
+    std::println( "; +----------------+" );
+    std::println();
 #endif
 
     return table;
