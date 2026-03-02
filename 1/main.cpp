@@ -297,19 +297,6 @@ std::string move_accumulator( unsigned char const *& instruction ) {
 /// Arithmetic instructions
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Names for the arithmetic sub op codes
-StringTable<8> constexpr arithmetic_mnemonics {
-    "add",
-    "or",
-    "adc",
-    "sbb",
-    "and",
-    "sub",
-    "xor",
-    "cmp",
-};
-
-
 std::string arithmetic_register_r_m( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char w : 1;
@@ -323,7 +310,7 @@ std::string arithmetic_register_r_m( unsigned char const *& instruction ) {
     if ( header->op1 != 0b0 and header->op2 != 0b00 )
         return "";
 
-    return std::format( "{} {}", arithmetic_mnemonics[header->subop], decode_r_m_to_reg( instruction ) );
+    return std::format( "{} {}", get_mnemonic( instruction ), decode_r_m_to_reg( instruction ) );
 }
 
 
@@ -343,7 +330,7 @@ std::string arithmetic_immediate_r_m( unsigned char const *& instruction ) {
     if ( values->opcode != 0b100000 )
         return "";
 
-    return std::format( "{} {}", arithmetic_mnemonics[values->subop], decode_imm_to_r_m( instruction ) );
+    return std::format( "{} {}", get_mnemonic( instruction ), decode_imm_to_r_m( instruction ) );
 }
 
 
@@ -359,18 +346,12 @@ std::string arithmetic_accumulator( unsigned char const *& instruction ) {
     if ( header->op1 != 0b00 and header->op2 != 0b10 )
         return "";
 
-    return std::format( "{} {}", arithmetic_mnemonics[header->subop], decode_imm_to_accum( instruction ) );
+    return std::format( "{} {}", get_mnemonic( instruction ), decode_imm_to_accum( instruction ) );
 };
  
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Jump instructions
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-StringTable<20> constexpr jumps {
-    "jo", "jno", "jb", "jnb", "je", "jne", "jbe", "jnbe", "js", "jns",
-    "jp", "jnp", "jl", "jnl", "jle", "jnle", "loopne", "loope", "loop", "jcxz",
-};
-
 
 std::string jump_conditional( unsigned char const *& instruction ) {
     unsigned char constexpr index_masks[2] { 0b0000'1111, 0b0000'0011 };
@@ -406,7 +387,7 @@ std::string unary_r_m( unsigned char const *& instruction ) {
     instruction += sizeof( Instruction );
     std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
 
-    return std::format( "{} {}", mnemonic, r_m );
+    return std::format( "{} word {}", mnemonic, r_m );
 }
 
 std::string push_pop_reg( unsigned char const *& instruction ) {
@@ -435,6 +416,37 @@ std::string push_pop_seg_reg( unsigned char const *& instruction ) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// Exchange
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+std::string exchange_reg_r_m( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char w : 1;
+        unsigned char opcode : 7;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    if ( header->opcode != 0b100'0011 )
+        return "";
+
+    return std::format( "xchg {}", decode_r_m_to_reg( instruction ) );
+}
+
+std::string exchange_reg_imm( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char reg : 3;
+        unsigned char opcode : 5;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    if ( header->opcode != 0b1'0010 )
+        return "";
+
+    ++instruction;
+    return std::format( "xchg ax, {}", reg_names[0b0000'1000 | header->reg] );
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// General decoding
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -458,9 +470,13 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b1110'0000 | i] = jump_conditional;
     for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 10000000 , 10000011 ]
         table[0b1000'0000 | i] = arithmetic_immediate_r_m;
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i ) // [ 10000110 , 10000111 ]
+        table[0b1000'0110 | i] = exchange_reg_r_m;
     for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 10001000 , 10001011 ]
         table[0b1000'1000 | i] = move_register_r_m;
     table[0b1000'1111] = unary_r_m;                  // [ 10001111 ]
+    for ( unsigned char i { 0 }; i < (1 << 3); ++i ) // [ 10010000 , 10010111 ]
+        table[0b1001'0000 | i] = exchange_reg_imm;
     for ( unsigned char i { 0 }; i < (1 << 2); ++i ) // [ 10100000 , 10100011 ]
         table[0b1010'0000 | i] = move_accumulator;
     for ( unsigned char i { 0 }; i < (1 << 4); ++i ) // [ 10110000 , 10111111 ]
