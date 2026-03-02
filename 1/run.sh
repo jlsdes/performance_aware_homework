@@ -1,3 +1,7 @@
 #!/usr/bin/bash
 
-make -C build > /dev/null && ./disasm "$@"
+if [[ ! -e build ]]; then
+    cmake -B build
+fi
+
+make -C build > /dev/null && ./build/disasm "$@"
