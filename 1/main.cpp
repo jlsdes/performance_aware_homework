@@ -368,12 +368,13 @@ std::string group_2_r_m( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     instruction += sizeof( Instruction );
     std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+    std::string const value_type { values->mod == 0b11 ? "" : values->w ? "word " : "byte " };
 
-    return std::format( "{} word {}", mnemonic, r_m );
+    return std::format( "{} {}{}", mnemonic, value_type, r_m );
 }
 
 
-std::string push_pop_reg( unsigned char const *& instruction ) {
+std::string group_2_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char reg : 3;
         unsigned char opcode : 5;
@@ -463,9 +464,15 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 000__11_
     for ( unsigned char i { 0 }; i < (1 << 3); ++i )
         table[0b0000'0110 | i | (i << 2)] = push_pop_seg_reg;
+    // 001_0111
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
+        table[0b0010'0111 | (i << 4)] = decode_only_mnemonic;
+    // 01000___
+    for ( unsigned char i { 0 }; i < (1 << 3); ++i )
+        table[0b0100'0000 | i] = group_2_reg;
     // 0101____
     for ( unsigned char i { 0 }; i < (1 << 4); ++i )
-        table[0b0101'0000 | i] = push_pop_reg;
+        table[0b0101'0000 | i] = group_2_reg;
     // 0111____
     for ( unsigned char i { 0 }; i < (1 << 4); ++i )
         table[0b0111'0000 | i] = jump_conditional;
