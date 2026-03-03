@@ -153,37 +153,36 @@ std::string get_r_m_name( unsigned char const r_m,
     return stream.str();
 };
 
+struct RmToRegDecoder {
+    bool force_swap = false;
+    bool force_wide = false;
 
-std::string _decode_r_m_to_reg( unsigned char const *& instruction, bool const force_swap = false ) {
-    struct Instruction {
-        // First byte
-        unsigned char w : 1;
-        unsigned char d : 1;
-        unsigned char opcode : 6;
-        // Second byte
-        unsigned char r_m : 3;
-        unsigned char reg : 3;
-        unsigned char mod : 2;
-    };
-    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+    std::string operator()( unsigned char const *& instruction ) {
+        struct Instruction {
+            // First byte
+            unsigned char w : 1;
+            unsigned char d : 1;
+            unsigned char opcode : 6;
+            // Second byte
+            unsigned char r_m : 3;
+            unsigned char reg : 3;
+            unsigned char mod : 2;
+        };
+        auto const values { reinterpret_cast<Instruction const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    instruction += sizeof( Instruction );
-    std::string source { reg_names[(values->w << 3) | values->reg] };
-    std::string destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
-    if ( force_swap or values->d )
-        std::swap( source, destination );
+        bool const wide { force_wide or values->w };
+        bool const swap { force_swap or values->d };
 
-    return std::format( "{} {}, {}", mnemonic, destination, source );
-}
+        std::string const mnemonic { get_mnemonic( instruction ) };
+        instruction += sizeof( Instruction );
+        std::string source { reg_names[(wide << 3) | values->reg] };
+        std::string destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+        if ( swap )
+            std::swap( source, destination );
 
-std::string decode_r_m_to_reg( unsigned char const *& instruction ) {
-    return _decode_r_m_to_reg( instruction, false );
-}
-
-std::string decode_r_m_to_reg_swap( unsigned char const *& instruction ) {
-    return _decode_r_m_to_reg( instruction, true );
-}
+        return std::format( "{} {}, {}", mnemonic, destination, source );
+    }
+};
 
 
 std::string decode_imm_to_r_m( unsigned char const *& instruction ) {
@@ -457,7 +456,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     for ( unsigned char j { 0 }; j < (1 << 3); ++j ) {
         unsigned char const subop ( j << 3 );
         for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-            table[0b0000'0000 | i | subop] = decode_r_m_to_reg;
+            table[0b0000'0000 | i | subop] = RmToRegDecoder {};
         for ( unsigned char i { 0 }; i < (1 << 1); ++i )
             table[0b0000'0100 | i | subop] = arithmetic_accumulator;
     }
@@ -481,12 +480,12 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b1000'0000 | i] = arithmetic_immediate_r_m;
     // 1000011_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1000'0110 | i] = decode_r_m_to_reg;
+        table[0b1000'0110 | i] = RmToRegDecoder {};
     // 100010__
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1000'1000 | i] = decode_r_m_to_reg;
+        table[0b1000'1000 | i] = RmToRegDecoder {};
     // 10001101
-    table[0b1000'1101] = decode_r_m_to_reg_swap;
+    table[0b1000'1101] = RmToRegDecoder { .force_swap = true };
     // 10001111
     table[0b1000'1111] = group_2_r_m;
     // 10010___
@@ -503,7 +502,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b1011'0000 | i] = move_immediate_reg;
     // 1100010_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1100'0100 | i] = decode_r_m_to_reg_swap;
+        table[0b1100'0100 | i] = RmToRegDecoder { .force_swap = true, .force_wide = true };
     // 1100011_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1100'0110 | i] = move_immediate_r_m;
