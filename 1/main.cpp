@@ -349,10 +349,10 @@ std::string jump_conditional( unsigned char const *& instruction ) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Group 2 operations
+/// Group 1/2 operations
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-std::string group_2_r_m( unsigned char const *& instruction ) {
+std::string group_r_m( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
         unsigned char w : 1;
@@ -373,7 +373,7 @@ std::string group_2_r_m( unsigned char const *& instruction ) {
 }
 
 
-std::string group_2_reg( unsigned char const *& instruction ) {
+std::string group_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char reg : 3;
         unsigned char opcode : 5;
@@ -466,12 +466,9 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 001_0111
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b0010'0111 | (i << 4)] = decode_only_mnemonic;
-    // 01000___
-    for ( unsigned char i { 0 }; i < (1 << 3); ++i )
-        table[0b0100'0000 | i] = group_2_reg;
-    // 0101____
-    for ( unsigned char i { 0 }; i < (1 << 4); ++i )
-        table[0b0101'0000 | i] = group_2_reg;
+    // 010_____
+    for ( unsigned char i { 0 }; i < (1 << 5); ++i )
+        table[0b0100'0000 | i] = group_reg;
     // 0111____
     for ( unsigned char i { 0 }; i < (1 << 4); ++i )
         table[0b0111'0000 | i] = jump_conditional;
@@ -487,7 +484,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 10001101
     table[0b1000'1101] = RmToRegDecoder { .force_swap = true };
     // 10001111
-    table[0b1000'1111] = group_2_r_m;
+    table[0b1000'1111] = group_r_m;
     // 10010___
     for ( unsigned char i { 0 }; i < (1 << 3); ++i )
         table[0b1001'0000 | i] = exchange_reg_imm;
@@ -515,9 +512,12 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         for ( unsigned char j { 0 }; j < (1 << 1); ++j )
             table[0b1110'0100 | i | (j << 3)] = in_out;
+    // 1111011_
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
+        table[0b1111'0110 | i] = group_r_m;
     // 1111111_
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1111'1110 | i] = group_2_r_m;
+        table[0b1111'1110 | i] = group_r_m;
 
 #if ( true )
     std::println( "; Current table status:" );
