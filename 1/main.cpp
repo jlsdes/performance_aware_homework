@@ -288,9 +288,11 @@ std::string group_r_m( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     instruction += sizeof( Instruction );
     std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
-    std::string const value_type { values->mod == 0b11 ? "" : values->w ? "word " : "byte " };
 
-    if ( values->opcode == 0b111'1011 and values->subop == 0b000 ) { // Special case: test instruction
+    bool const hide_type { (values->opcode == 0b111'1111 and values->subop > 0b001) or (values->mod == 0b11) };
+    std::string const value_type { hide_type ? "" : values->w ? "word " : "byte " };
+
+    if ( values->opcode == 0b1111'011 and values->subop == 0b000 ) { // Special case: test instruction
         int const test_value { get_value( instruction, values->w, true ) };
         return std::format( "{} {}{}, {}", mnemonic, value_type, r_m, test_value );
     }
@@ -378,7 +380,21 @@ std::string shift( unsigned char const *& instruction ) {
     std::string const destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
 
     return std::format( "{} {}{}, {}", mnemonic, value_type, destination, source );
-};
+}
+
+
+std::string repeat( unsigned char const *& instruction ) {
+    struct SecondByte {
+        unsigned char w : 1;
+        unsigned char opcode : 7;
+    };
+    auto const values { reinterpret_cast<SecondByte const *>( instruction + 1 ) };
+
+    std::string const mnemonic { get_mnemonic( instruction++ ) };
+    std::string const name { get_mnemonic( instruction++ ) };
+
+    return std::format( "{} {}{}", mnemonic, name, values->w ? 'w' : 'b' );
+}
 
 
 std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr decoding_table() {
@@ -457,9 +473,15 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0xe4 | i] = in_out;
         table[0xec | i] = in_out;
     }
+    // f2 f3
+    table[0xf2] = repeat;
+    table[0xf3] = repeat;
     // f6 f7
     table[0xf6] = group_r_m;
     table[0xf7] = group_r_m;
+    // f8 f9 fa fb fc fd
+    for ( unsigned char i { 0xf8 }; i < 0xfe; ++i )
+        table[i] = MnemonicDecoder {};
     // fe ff
     table[0xfe] = group_r_m;
     table[0xff] = group_r_m;
