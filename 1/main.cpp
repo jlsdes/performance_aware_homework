@@ -25,7 +25,7 @@ StringTable<256> constexpr mnemonics {
     "xchg", "xchg", "xchg", "xchg", "xchg", "xchg", "xchg", "xchg", "cbw", "cwd", "call", "wait", "pushf", "popf", "sahf", "lahf",
     "mov", "mov", "mov", "mov", "movs", "movs", "cmps", "cmps", "test", "test", "stos", "stos", "lods", "lods", "scas", "scas",
     "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov",
-    "ERR", "ERR", "ret", "ret", "les", "lds", "mov", "mov", "ERR", "ERR", "ret", "ret", "int3", "int", "into", "iret",
+    "ERR", "ERR", "ret", "ret", "les", "lds", "mov", "mov", "ERR", "ERR", "retf", "retf", "int3", "int", "into", "iret",
     "SHIFT", "SHIFT", "SHIFT", "SHIFT", "aam", "aad", "ERR", "xlat", "esc", "esc", "esc", "esc", "esc", "esc", "esc", "esc",
     "loopnz", "loopz", "loop", "jcxz", "in", "in", "out", "out", "call", "jmp", "jmp", "jmp", "in", "in", "out", "out",
     "lock", "ERR", "rep", "rep", "hlt", "cmc", "GRP1", "GRP1", "clc", "stc", "cli", "sti", "cld", "std", "GRP2", "GRP2",
@@ -463,7 +463,7 @@ std::string direct_segment( unsigned char const *& instruction ) {
     instruction += sizeof( HeaderByte );
     int const ip_inc { get_value( instruction, not header->unwide, false ) };
 
-    return std::format( "{} {}", mnemonic, ip_inc );
+    return std::format( "{} ${:+}", mnemonic, ip_inc + 3 );
 }
 
 
@@ -607,7 +607,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     table[0xfe] = group_r_m;
     table[0xff] = group_r_m;
 
-#if ( true )
+#if ( 0 )
     std::println( "; Current table status:" );
     std::println( "; +----------------+" );
     for ( unsigned int row { 0 }; row < 16; ++row ) {
@@ -655,8 +655,17 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
             auto const loc { result.find_first_of( '$' ) };
             int const offset { std::stoi( result.substr( loc + 1 ) ) };
             int const label_id ( (previous - instructions) + offset );
-            labels.emplace( label_id );
-            result = std::format( "{}label_{}", result.substr( 0, loc ), label_id );
+
+            // Only replace the offset with a label if the destination is within the program.
+            // I have no idea whether this is generally true for actual programs, but the
+            // challenges do contain some offsets that exceed the size of the program.
+            // For these large offsets, the actual destination can still be computed however.
+            if ( label_id <= end - instructions ) {
+                labels.emplace( label_id );
+                result = std::format( "{}label_{}", result.substr( 0, loc ), label_id );
+            } else {
+                result = std::format( "{}{}", result.substr( 0, loc ), label_id );
+            }
         }
 
         // Collect the generated assembly code
@@ -682,7 +691,11 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
             ++label_iter;
         }
         byte_counter += bytes[line].size() / 5; // All machine code comments are formatted as " 0x__"
+#if ( 1 )
         std::println( "{:40};{}", assembly[line], bytes[line] );
+#else
+        std::println( "{}", assembly[line] );
+#endif
     }
     return success;
 }
