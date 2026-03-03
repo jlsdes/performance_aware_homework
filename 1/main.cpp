@@ -5,13 +5,14 @@
 #include <functional>
 #include <print>
 #include <set>
+#include <stdexcept>
 #include <string>
 
 
 template <std::size_t table_size>
 using StringTable = std::array<std::string, table_size>;
 
-// Page 178 of https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
+// Based on page 178 of https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 StringTable<256> constexpr mnemonics {
     "add", "add", "add", "add", "add", "add", "push", "pop", "or", "or", "or", "or", "or", "or", "push", "ERR",
     "adc", "adc", "adc", "adc", "adc", "adc", "push", "pop", "sbb", "sbb", "sbb", "sbb", "sbb", "sbb", "push", "pop",
@@ -46,6 +47,7 @@ StringTable<8> constexpr group_1_table {
 StringTable<8> constexpr group_2_table {
     "inc", "dec", "call", "call", "jmp", "jmp", "push", "ERR",
 };
+
 
 std::string constexpr get_mnemonic( unsigned char const * const instruction ) {
     switch ( *instruction ) {
@@ -100,52 +102,57 @@ StringTable<4> constexpr seg_reg_names {
 };
 
 
+/// Converts 1 or 2 bytes into an integer, and advances the instruction pointer beyond the converted bytes.
+/// 'w' determines the number of bytes (false: 1, true: 2), and 's' determines whether a signed (true) or
+/// unsigned (false) value is read. The returned value is a signed integer either way.
 inline int get_value( unsigned char const *& instruction, bool const w, bool const s ) {
+    unsigned char const * const value { instruction };
+    instruction += 1 + w;
     int result;
     switch ( w << 1 | s ) {
     case 0b00:
-        return *(instruction++);
+        return *value;
     case 0b01:
-        return *reinterpret_cast<char const *>( instruction++ );
+        return *reinterpret_cast<char const *>( value );
     case 0b10:
-        result = *reinterpret_cast<unsigned short const *>( instruction );
-        break;
+        return *reinterpret_cast<unsigned short const *>( value );
     case 0b11:
-        result = *reinterpret_cast<short const *>( instruction );
-        break;
+        return *reinterpret_cast<short const *>( value );
+    default:
+        throw std::runtime_error( "This should not happen..." );
     }
-    instruction += 2;
-    return result;
 }
 
 
+/// Returns the register name or memory location targetted by the instruction parameters.
+/// This function expects the 'instruction' argument to have been advanced past the 2 instruction header bytes,
+/// and will advance the pointer further if it needs to read a displacement value.
 std::string get_r_m_name( unsigned char const r_m,
                           unsigned char const mod,
                           unsigned char const w,
                           unsigned char const *& instruction ) {
-    if ( mod == 0b11 )
+    if ( mod == 0b11 ) // r_m represents a register
         return reg_names[(w << 3) | r_m];
 
     bool const direct_address { mod == 0b00 and r_m == 0b110 };
-
-    bool const no_displacement { mod == 0b00 and not direct_address };
+    bool const no_displacement { mod == 0b00 and r_m != 0b110 };
     bool const wide_displacement { mod == 0b10 or direct_address };
     int const displacement { no_displacement ? 0 : get_value( instruction, wide_displacement, true ) };
 
-    std::stringstream stream {};
-    stream << '[';
     if ( direct_address )
-        stream << displacement;
-    else {
-        stream << reg_sums[r_m];
-        if ( displacement != 0 )
-            stream << (displacement < 0 ? " - " : " + ") << std::abs( displacement );
-    }
-    stream << ']';
-    return stream.str();
+        return std::format( "[{}]", displacement );
+    else if ( displacement )
+        return std::format( "[{} {} {}]", reg_sums[r_m], (displacement < 0 ? '-' : '+'), std::abs( displacement ) );
+    else
+        return std::format( "[{}]", reg_sums[r_m] );
 };
 
 
+/// Decodes instructions that have the structure defined in the 'Instruction' struc below. These operate on either
+/// two registers, or one register and a memory location.
+/// This 'force_swap' attribute forces the 'd' bit to be ignored, and to always swap the source and destination.
+/// This is used for the out instruction (e.g.?). The 'force_wide' attribute similarly, forces the 'w' bit to be
+/// ignored, and to always operate using 16 bit values.
 struct RmToRegDecoder {
     bool force_swap { false };
     bool force_wide { false };
@@ -178,6 +185,10 @@ struct RmToRegDecoder {
 };
 
 
+/// Decodes instructions that have the structure defined in the 'Instruction' struct below. These operate on
+/// an immediate value and a register or memory location.
+/// The 'mid_type' attribute indicates whether the type keywords "word" and "byte" should be placed in the
+/// middle of the instructions (e.g. mov [bp + di], byte 7) rather than at the start (e.g. add byte [bx], 34).
 struct ImmToRmDecoder {
     bool mid_type { false };
 
@@ -212,6 +223,10 @@ struct ImmToRmDecoder {
 };
 
 
+/// Decodes instructions that have the structure defined in the 'Instruction' struct below. These operate on
+/// an accumulator register and a register or memory location.
+/// The 'bracketed' attribute indicates whether the following byte(s) contain a memory location or an actual
+/// immediate value.
 struct ImmToAccumDecoder {
     bool bracketed { false };
 
@@ -237,6 +252,7 @@ struct ImmToAccumDecoder {
 };
 
 
+/// Decodes a simple instruction that either has no operand, or just one value in the following byte(s).
 struct MnemonicDecoder {
     unsigned int header_bytes { 1 };
     bool has_value { false };
@@ -253,6 +269,7 @@ struct MnemonicDecoder {
 };
 
 
+/// Decodes a move instruction that simply moves an immediate value into a register.
 std::string move_immediate_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char reg : 3;
@@ -269,6 +286,7 @@ std::string move_immediate_reg( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes a move instruction that uses a segment register.
 std::string move_r_m_seg( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
@@ -291,6 +309,10 @@ std::string move_r_m_seg( unsigned char const *& instruction ) {
 }
  
 
+/// Decodes a conditional jump instruction. The offset values are relative to the end of the instruction in
+/// machine code, but to the start of the instruction in assembly, so we still need to add 2 to get correct
+/// offsets. (All instructions that are decoded by this function are exactly 2 bytes large.)
+/// Also, there is a post-processing step where these offsets are converted into labels if possible.
 std::string jump_conditional( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     int const offset { get_value( ++instruction, false, true ) };
@@ -299,6 +321,8 @@ std::string jump_conditional( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes instructions that are part of the group 1 or group 2 sets, and that can operate on either a
+/// register or a memory location.
 std::string group_r_m( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
@@ -332,6 +356,7 @@ std::string group_r_m( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes instructions that are part of the group 1 or group 2 sets, and that only operate on a register.
 std::string group_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char reg : 3;
@@ -556,8 +581,14 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // a0 a1 a2 a3
     for ( unsigned char i { 0xa0 }; i < 0xa4; ++i )
         table[i] = ImmToAccumDecoder { .bracketed = true };
+    // a4 a5 a6 a7
+    for ( unsigned char i { 0xa4 }; i < 0xa8; ++i )
+        table[i] = MnemonicDecoder {};
     table[0xa8] = ImmToAccumDecoder {};
     table[0xa9] = ImmToAccumDecoder {};
+    // aa ab ac ad ae af
+    for ( unsigned char i { 0xaa }; i < 0b0; ++i )
+        table[i] = MnemonicDecoder {};
     // b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bf
     for ( unsigned char i { 0xb0 }; i < 0xc0; ++i )
         table[i] = move_immediate_reg;
@@ -580,8 +611,8 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     table[0xd5] = MnemonicDecoder { .header_bytes = 2 };
     table[0xd7] = MnemonicDecoder {};
     // d8 d9 da db dc dd de
-    for ( unsigned char i { 0xd8 }; i < 0xdf; ++i )
-        table[i] = nullptr;
+    for ( unsigned char i { 0xd8 }; i < 0xe0; ++i )
+        table[i] = escape;
     // e0 e1 e2 e3
     for ( unsigned char i { 0xe0 }; i < 0xe4; ++i )
         table[i] = jump_conditional;
@@ -607,7 +638,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     table[0xfe] = group_r_m;
     table[0xff] = group_r_m;
 
-#if ( 0 )
+#if ( 1 )
     std::println( "; Current table status:" );
     std::println( "; +----------------+" );
     for ( unsigned int row { 0 }; row < 16; ++row ) {
@@ -690,8 +721,10 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
             std::println( "label_{}:", byte_counter );
             ++label_iter;
         }
-        byte_counter += bytes[line].size() / 5; // All machine code comments are formatted as " 0x__"
-#if ( 1 )
+        // All machine code comments are formatted as " 0x__", i.e. length 5
+        byte_counter += bytes[line].size() / 5;
+
+#if ( 1 ) // Toggle whether the machine code is written as comments next to the generated assembly
         std::println( "{:40};{}", assembly[line], bytes[line] );
 #else
         std::println( "{}", assembly[line] );
