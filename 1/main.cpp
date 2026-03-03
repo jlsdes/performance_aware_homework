@@ -8,10 +8,6 @@
 #include <string>
 
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Big tables
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 template <std::size_t table_size>
 using StringTable = std::array<std::string, table_size>;
 
@@ -74,10 +70,6 @@ std::string constexpr get_mnemonic( unsigned char const * const instruction ) {
     }
 }
 
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Utility functions and arrays
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Register field encoding, where indices are formed by 4 bits: <w><reg>
 StringTable<16> constexpr reg_names {
@@ -230,8 +222,9 @@ struct ImmToAccumDecoder {
             unsigned char opcode : 6;
         };
         auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
-        instruction += sizeof( HeaderByte );
 
+        std::string const mnemonic { get_mnemonic( instruction ) };
+        instruction += sizeof( HeaderByte );
         std::string source { std::to_string( get_value( instruction, header->w, true ) ) };
         if ( bracketed )
             source = '[' + source + ']';
@@ -239,7 +232,7 @@ struct ImmToAccumDecoder {
         if ( header->d )
             std::swap( source, destination );
 
-        return std::format( "{}, {}", destination, source );
+        return std::format( "{} {}, {}", mnemonic, destination, source );
     }
 };
 
@@ -254,9 +247,6 @@ struct MnemonicDecoder {
     };
 };
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Move instructions
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::string move_immediate_reg( unsigned char const *& instruction ) {
     struct Instruction {
@@ -268,36 +258,20 @@ std::string move_immediate_reg( unsigned char const *& instruction ) {
     auto const values { reinterpret_cast<Instruction const *>( instruction ) };
     ++instruction;
 
-    if ( values->opcode != 0b1011 )
-        return "";
-
     unsigned char const destination ( (values->w << 3) | values->reg );
     int const source { get_value( instruction, values->w, true ) };
 
     return std::format( "mov {}, {}", reg_names[destination], source );
 }
  
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Jump instructions
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::string jump_conditional( unsigned char const *& instruction ) {
-    unsigned char constexpr index_masks[2] { 0b0000'1111, 0b0000'0011 };
-    unsigned char constexpr opcode_masks[2] { 0b1111'0000, 0b1111'1100 };
-    unsigned char constexpr opcodes[2] { 0b0111'0000, 0b1110'0000 };
-
-    bool const first_bit ( *instruction & 0b1000'0000 );
-    if ( (*instruction & opcode_masks[first_bit]) != opcodes[first_bit] )
-        return "";
-
     std::string const mnemonic { get_mnemonic( instruction ) };
     int const offset { get_value( ++instruction, false, true ) };
+
     return std::format( "{} ${:+}", mnemonic, offset + 2 );
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Group 1/2 operations
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::string group_r_m( unsigned char const *& instruction ) {
     struct Instruction {
@@ -346,9 +320,6 @@ std::string push_pop_seg_reg( unsigned char const *& instruction ) {
     return std::format( "{} {}", mnemonic, seg_reg_names[header->seg_reg] );
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Exchange
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::string exchange_reg_imm( unsigned char const *& instruction ) {
     struct HeaderByte {
@@ -357,16 +328,10 @@ std::string exchange_reg_imm( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    if ( header->opcode != 0b1'0010 )
-        return "";
-
     ++instruction;
     return std::format( "xchg ax, {}", reg_names[0b0000'1000 | header->reg] );
 };
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// Input / output
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::string in_out( unsigned char const *& instruction ) {
     struct HeaderByte {
@@ -378,9 +343,6 @@ std::string in_out( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    if ( header->opcode != 0b1110 or header->one != 1 )
-        return "";
-
     std::string const mnemonic { get_mnemonic( instruction ) };
     instruction += sizeof( HeaderByte );
     std::string destination { header->w ? "ax" : "al" };
@@ -391,9 +353,29 @@ std::string in_out( unsigned char const *& instruction ) {
     return std::format( "{} {}, {}", mnemonic, destination, source );
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// General decoding
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+std::string shift( unsigned char const *& instruction ) {
+    struct Instruction {
+        // First byte
+        unsigned char w : 1;
+        unsigned char v : 1;
+        unsigned char opcode : 6;
+        // Second byte
+        unsigned char r_m : 3;
+        unsigned char subop : 3;
+        unsigned char mod : 2;
+    };
+    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    instruction += sizeof( Instruction );
+    std::string const source { values->v ? "cl" : "1" };
+    std::string const value_type { values->mod == 0b11 ? "" : values->w ? "word " : "byte " };
+    std::string const destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+
+    return std::format( "{} {}{}, {}", mnemonic, value_type, destination, source );
+};
+
 
 std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr decoding_table() {
     std::array<std::function<std::string(unsigned char const *&)>, 256> table { nullptr };
@@ -435,6 +417,9 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 90 91 92 93 94 95 96 97
     for ( unsigned char i { 0 }; i < (1 << 3); ++i )
         table[0b1001'0000 | i] = exchange_reg_imm;
+    // 98 99
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
+        table[0b1001'1000 | i] = MnemonicDecoder {};
     // 9c 9d 9e 9f
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1001'1100 | i] = MnemonicDecoder {};
@@ -450,6 +435,9 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // c6 c7
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1100'0110 | i] = ImmToRmDecoder { .mid_type = true };
+    // d0 d1 d2 d3
+    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
+        table[0b1101'0000 | i] = shift;
     // d4 d5
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1101'0100 | i] = MnemonicDecoder { .nr_bytes = 2 };
