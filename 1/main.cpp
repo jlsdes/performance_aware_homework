@@ -155,8 +155,8 @@ std::string get_r_m_name( unsigned char const r_m,
 
 
 struct RmToRegDecoder {
-    bool force_swap = false;
-    bool force_wide = false;
+    bool force_swap { false };
+    bool force_wide { false };
 
     std::string operator()( unsigned char const *& instruction ) {
         struct Instruction {
@@ -187,7 +187,7 @@ struct RmToRegDecoder {
 
 
 struct ImmToRmDecoder {
-    bool mid_type = false;
+    bool mid_type { false };
 
     std::string operator()( unsigned char const *& instruction ) {
         struct Instruction {
@@ -221,7 +221,7 @@ struct ImmToRmDecoder {
 
 
 struct ImmToAccumDecoder {
-    bool bracketed = false;
+    bool bracketed { false };
 
     std::string operator()( unsigned char const *& instruction ) {
         struct HeaderByte {
@@ -244,8 +244,14 @@ struct ImmToAccumDecoder {
 };
 
 
-std::string decode_only_mnemonic( unsigned char const *& instruction ) {
-    return get_mnemonic( instruction++ );
+struct MnemonicDecoder {
+    unsigned int nr_bytes { 1 };
+
+    std::string operator()( unsigned char const *& instruction ) {
+        std::string const mnemonic { get_mnemonic( instruction ) };
+        instruction += nr_bytes;
+        return mnemonic;
+    };
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -406,7 +412,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b0000'0110 | i | (i << 2)] = push_pop_seg_reg;
     // 27 2f 37 3f
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b0010'0111 | (i << 3)] = decode_only_mnemonic;
+        table[0b0010'0111 | (i << 3)] = MnemonicDecoder {};
     // 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f
     for ( unsigned char i { 0 }; i < (1 << 5); ++i )
         table[0b0100'0000 | i] = group_reg;
@@ -431,7 +437,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b1001'0000 | i] = exchange_reg_imm;
     // 9c 9d 9e 9f
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1001'1100 | i] = decode_only_mnemonic;
+        table[0b1001'1100 | i] = MnemonicDecoder {};
     // a0 a1 a2 a3
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1010'0000 | i] = ImmToAccumDecoder { .bracketed = true };
@@ -444,8 +450,11 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // c6 c7
     for ( unsigned char i { 0 }; i < (1 << 1); ++i )
         table[0b1100'0110 | i] = ImmToRmDecoder { .mid_type = true };
+    // d4 d5
+    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
+        table[0b1101'0100 | i] = MnemonicDecoder { .nr_bytes = 2 };
     // d7
-    table[0b1101'0111] = decode_only_mnemonic;
+    table[0b1101'0111] = MnemonicDecoder {};
     // e0 e1 e2 e3
     for ( unsigned char i { 0 }; i < (1 << 2); ++i )
         table[0b1110'0000 | i] = jump_conditional;
