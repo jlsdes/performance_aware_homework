@@ -407,6 +407,27 @@ std::string repeat( unsigned char const *& instruction ) {
 }
 
 
+std::string escape( unsigned char const *& instruction ) {
+    struct Instruction {
+        // First byte
+        unsigned char op1 : 3;
+        unsigned char opcode : 5;
+        // Second byte
+        unsigned char r_m : 3;
+        unsigned char op2 : 3;
+        unsigned char mod : 2;
+    };
+    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    std::string const source { get_r_m_name( values->r_m, values->mod, true, instruction ) };
+
+    if ( values->op2 == 0b111 )
+        return "esc";
+    return std::format( "esc {}, {}", (values->op1 << 3 | values->op2), source );
+}
+
+
 // Forward declaration for prefix() to work with
 std::string decode( unsigned char const *& instruction );
 
@@ -414,6 +435,23 @@ std::string prefix( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     ++instruction;
     return std::format( "{} {}", mnemonic, decode( instruction ) );
+}
+
+
+std::string segment_override( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char op1 : 3;
+        unsigned char seg : 2;
+        unsigned char op2 : 3;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    std::string result { decode( ++instruction ) };
+    std::string const segment { seg_reg_names[header->seg] + ':' };
+
+    auto const mem_location { std::find( result.cbegin(), result.cend(), '[') };
+    result.insert( mem_location, segment.cbegin(), segment.cend() );
+    return result;
 }
 
 
@@ -437,6 +475,9 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 27 2f 37 3f
     for ( unsigned char i { 0b000 }; i < 0b100; ++i )
         table[0b0010'0111 | (i << 3)] = MnemonicDecoder {};
+    // 2e
+    for ( unsigned char i { 0b000 }; i < 0b100; ++i )
+        table[0b0010'0110 | (i << 3)] = segment_override;
     // 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f
     for ( unsigned char i { 0x40 }; i < 0x60; ++i )
         table[i] = group_reg;
@@ -499,6 +540,9 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     table[0xd5] = MnemonicDecoder { .header_bytes = 2 };
     // d7
     table[0xd7] = MnemonicDecoder {};
+    // d8 d9 da db dc dd de
+    for ( unsigned char i { 0xd8 }; i < 0xdf; ++i )
+        table[i] = nullptr;
     // e0 e1 e2 e3
     for ( unsigned char i { 0xe0 }; i < 0xe4; ++i )
         table[i] = jump_conditional;
