@@ -380,82 +380,82 @@ std::string shift( unsigned char const *& instruction ) {
 std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr decoding_table() {
     std::array<std::function<std::string(unsigned char const *&)>, 256> table { nullptr };
 
-    for ( unsigned char j { 0 }; j < (1 << 3); ++j ) {
+    for ( unsigned char j { 0b0000 }; j < 0b1000; ++j ) {
         unsigned char const subop ( j << 3 );
         // 00 01 02 03 08 09 0a 0b 10 11 12 13 18 19 1a 1b 20 21 22 23 28 29 2a 2b 30 31 32 33 38 39 3a 3b
-        for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-            table[0b0000'0000 | i | subop] = RmToRegDecoder {};
+        for ( unsigned char i { 0b000 }; i < 0b100; ++i )
+            table[subop | i] = RmToRegDecoder {};
         // 04 05 0c 0d 14 15 1c 1d 24 25 2c 2d 34 35 3c 3d
-        for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-            table[0b0000'0100 | i | subop] = ImmToAccumDecoder {};
+        table[subop | 0b100] = ImmToAccumDecoder {};
+        table[subop | 0b101] = ImmToAccumDecoder {};
     }
     // 06 07 0e 0f 16 17 1e 1f
-    for ( unsigned char i { 0 }; i < (1 << 3); ++i )
-        table[0b0000'0110 | i | (i << 2)] = push_pop_seg_reg;
+    for ( unsigned char i { 0b000 }; i < 0b100; ++i ) {
+        table[0b0000'0110 | (i << 3)] = push_pop_seg_reg;
+        table[0b0000'0111 | (i << 3)] = push_pop_seg_reg;
+    }
     // 27 2f 37 3f
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
+    for ( unsigned char i { 0b000 }; i < 0b100; ++i )
         table[0b0010'0111 | (i << 3)] = MnemonicDecoder {};
     // 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f
-    for ( unsigned char i { 0 }; i < (1 << 5); ++i )
-        table[0b0100'0000 | i] = group_reg;
+    for ( unsigned char i { 0x40 }; i < 0x60; ++i )
+        table[i] = group_reg;
     // 70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f
-    for ( unsigned char i { 0 }; i < (1 << 4); ++i )
-        table[0b0111'0000 | i] = jump_conditional;
+    for ( unsigned char i { 0x70 }; i < 0x80; ++i )
+        table[i] = jump_conditional;
     // 80 81 82 83
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1000'0000 | i] = ImmToRmDecoder {};
-    // 86 87
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1000'0110 | i] = RmToRegDecoder {};
-    // 88 89 8a 8b
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1000'1000 | i] = RmToRegDecoder {};
+    for ( unsigned char i { 0x80 }; i < 0x84; ++i )
+        table[i] = ImmToRmDecoder {};
+    // 84 85 86 87 88 89 8a 8b
+    for ( unsigned char i { 0x84 }; i < 0x8c; ++i )
+        table[i] = RmToRegDecoder {};
     // 8d
-    table[0b1000'1101] = RmToRegDecoder { .force_swap = true };
+    table[0x8d] = RmToRegDecoder { .force_swap = true };
     // 8f
-    table[0b1000'1111] = group_r_m;
+    table[0x8f] = group_r_m;
     // 90 91 92 93 94 95 96 97
-    for ( unsigned char i { 0 }; i < (1 << 3); ++i )
-        table[0b1001'0000 | i] = exchange_reg_imm;
+    for ( unsigned char i { 0x90 }; i < 0x98; ++i )
+        table[i] = exchange_reg_imm;
     // 98 99
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1001'1000 | i] = MnemonicDecoder {};
+    table[0x98] = MnemonicDecoder {};
+    table[0x99] = MnemonicDecoder {};
     // 9c 9d 9e 9f
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1001'1100 | i] = MnemonicDecoder {};
+    for ( unsigned char i { 0x9c }; i < 0xa0; ++i )
+        table[i] = MnemonicDecoder {};
     // a0 a1 a2 a3
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1010'0000 | i] = ImmToAccumDecoder { .bracketed = true };
+    for ( unsigned char i { 0xa0 }; i < 0xa4; ++i )
+        table[i] = ImmToAccumDecoder { .bracketed = true };
     // b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bf
-    for ( unsigned char i { 0 }; i < (1 << 4); ++i )
-        table[0b1011'0000 | i] = move_immediate_reg;
+    for ( unsigned char i { 0xb0 }; i < 0xc0; ++i )
+        table[i] = move_immediate_reg;
     // c4 c5
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1100'0100 | i] = RmToRegDecoder { .force_swap = true, .force_wide = true };
+    table[0xc4] = RmToRegDecoder { .force_swap = true, .force_wide = true };
+    table[0xc5] = RmToRegDecoder { .force_swap = true, .force_wide = true };
     // c6 c7
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1100'0110 | i] = ImmToRmDecoder { .mid_type = true };
+    table[0xc6] = ImmToRmDecoder { .mid_type = true };
+    table[0xc7] = ImmToRmDecoder { .mid_type = true };
     // d0 d1 d2 d3
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1101'0000 | i] = shift;
+    for ( unsigned char i { 0xd0 }; i < 0xd4; ++i )
+        table[i] = shift;
     // d4 d5
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1101'0100 | i] = MnemonicDecoder { .nr_bytes = 2 };
+    table[0xd4] = MnemonicDecoder { .nr_bytes = 2 };
+    table[0xd5] = MnemonicDecoder { .nr_bytes = 2 };
     // d7
-    table[0b1101'0111] = MnemonicDecoder {};
+    table[0xd7] = MnemonicDecoder {};
     // e0 e1 e2 e3
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        table[0b1110'0000 | i] = jump_conditional;
+    for ( unsigned char i { 0xe0 }; i < 0xe4; ++i )
+        table[i] = jump_conditional;
     // e4 e5 e6 e7 ec ed ee ef
-    for ( unsigned char i { 0 }; i < (1 << 2); ++i )
-        for ( unsigned char j { 0 }; j < (1 << 1); ++j )
-            table[0b1110'0100 | i | (j << 3)] = in_out;
-    // e6 e7
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1111'0110 | i] = group_r_m;
+    for ( unsigned char i { 0b000 }; i < 0b100; ++i ) {
+        table[0xe4 | i] = in_out;
+        table[0xec | i] = in_out;
+    }
+    // f6 f7
+    table[0xf6] = group_r_m;
+    table[0xf7] = group_r_m;
     // fe ff
-    for ( unsigned char i { 0 }; i < (1 << 1); ++i )
-        table[0b1111'1110 | i] = group_r_m;
+    table[0xfe] = group_r_m;
+    table[0xff] = group_r_m;
 
 #if ( true )
     std::println( "; Current table status:" );
