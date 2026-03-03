@@ -290,6 +290,10 @@ std::string group_r_m( unsigned char const *& instruction ) {
     std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
     std::string const value_type { values->mod == 0b11 ? "" : values->w ? "word " : "byte " };
 
+    if ( values->opcode == 0b111'1011 and values->subop == 0b000 ) { // Special case: test instruction
+        int const test_value { get_value( instruction, values->w, true ) };
+        return std::format( "{} {}{}, {}", mnemonic, value_type, r_m, test_value );
+    }
     return std::format( "{} {}{}", mnemonic, value_type, r_m );
 }
 
@@ -425,6 +429,9 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // a0 a1 a2 a3
     for ( unsigned char i { 0xa0 }; i < 0xa4; ++i )
         table[i] = ImmToAccumDecoder { .bracketed = true };
+    // a8 a9
+    table[0xa8] = ImmToAccumDecoder {};
+    table[0xa9] = ImmToAccumDecoder {};
     // b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bf
     for ( unsigned char i { 0xb0 }; i < 0xc0; ++i )
         table[i] = move_immediate_reg;
