@@ -25,7 +25,7 @@ StringTable<256> constexpr mnemonics {
     "xchg", "xchg", "xchg", "xchg", "xchg", "xchg", "xchg", "xchg", "cbw", "cwd", "call", "wait", "pushf", "popf", "sahf", "lahf",
     "mov", "mov", "mov", "mov", "movs", "movs", "cmps", "cmps", "test", "test", "stos", "stos", "lods", "lods", "scas", "scas",
     "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov", "mov",
-    "ERR", "ERR", "ret", "ret", "les", "lds", "mov", "mov", "ERR", "ERR", "ret", "ret", "int", "int", "into", "iret",
+    "ERR", "ERR", "ret", "ret", "les", "lds", "mov", "mov", "ERR", "ERR", "ret", "ret", "int3", "int", "into", "iret",
     "SHIFT", "SHIFT", "SHIFT", "SHIFT", "aam", "aad", "ERR", "xlat", "esc", "esc", "esc", "esc", "esc", "esc", "esc", "esc",
     "loopnz", "loopz", "loop", "jcxz", "in", "in", "out", "out", "call", "jmp", "jmp", "jmp", "in", "in", "out", "out",
     "lock", "ERR", "rep", "rep", "hlt", "cmc", "GRP1", "GRP1", "clc", "stc", "cli", "sti", "cld", "std", "GRP2", "GRP2",
@@ -238,11 +238,16 @@ struct ImmToAccumDecoder {
 
 
 struct MnemonicDecoder {
-    unsigned int nr_bytes { 1 };
+    unsigned int header_bytes { 1 };
+    bool has_value { false };
+    bool wide { true };
+    bool sign { true };
 
     std::string operator()( unsigned char const *& instruction ) {
         std::string const mnemonic { get_mnemonic( instruction ) };
-        instruction += nr_bytes;
+        instruction += header_bytes;
+        if ( has_value )
+            return std::format( "{} {}", mnemonic, get_value( instruction, wide, sign ) );
         return mnemonic;
     };
 };
@@ -289,7 +294,12 @@ std::string group_r_m( unsigned char const *& instruction ) {
     instruction += sizeof( Instruction );
     std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
 
-    bool const hide_type { (values->opcode == 0b111'1111 and values->subop > 0b001) or (values->mod == 0b11) };
+    bool hide_type { false };
+    if ( values->mod == 0b11 )
+        hide_type = true;
+    if ( values->opcode == 0b111'1111 and values->subop > 0b001 and values->subop < 0b110 )
+        hide_type = true;
+    // bool const hide_type { (values->opcode == 0b111'1111 and values->subop > 0b001) or (values->mod == 0b11) };
     std::string const value_type { hide_type ? "" : values->w ? "word " : "byte " };
 
     if ( values->opcode == 0b1111'011 and values->subop == 0b000 ) { // Special case: test instruction
@@ -397,6 +407,16 @@ std::string repeat( unsigned char const *& instruction ) {
 }
 
 
+// Forward declaration for prefix() to work with
+std::string decode( unsigned char const *& instruction );
+
+std::string prefix( unsigned char const *& instruction ) {
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    ++instruction;
+    return std::format( "{} {}", mnemonic, decode( instruction ) );
+}
+
+
 std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr decoding_table() {
     std::array<std::function<std::string(unsigned char const *&)>, 256> table { nullptr };
 
@@ -439,8 +459,8 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 98 99
     table[0x98] = MnemonicDecoder {};
     table[0x99] = MnemonicDecoder {};
-    // 9c 9d 9e 9f
-    for ( unsigned char i { 0x9c }; i < 0xa0; ++i )
+    // 9b 9c 9d 9e 9f
+    for ( unsigned char i { 0x9b }; i < 0xa0; ++i )
         table[i] = MnemonicDecoder {};
     // a0 a1 a2 a3
     for ( unsigned char i { 0xa0 }; i < 0xa4; ++i )
@@ -451,18 +471,32 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bf
     for ( unsigned char i { 0xb0 }; i < 0xc0; ++i )
         table[i] = move_immediate_reg;
+    // c2
+    table[0xc2] = MnemonicDecoder { .has_value = true };
+    // c3
+    table[0xc3] = MnemonicDecoder {};
     // c4 c5
     table[0xc4] = RmToRegDecoder { .force_swap = true, .force_wide = true };
     table[0xc5] = RmToRegDecoder { .force_swap = true, .force_wide = true };
     // c6 c7
     table[0xc6] = ImmToRmDecoder { .mid_type = true };
     table[0xc7] = ImmToRmDecoder { .mid_type = true };
+    // ca
+    table[0xca] = MnemonicDecoder { .has_value = true };
+    // cb cc
+    table[0xcb] = MnemonicDecoder {};
+    table[0xcc] = MnemonicDecoder {};
+    // cd
+    table[0xcd] = MnemonicDecoder { .has_value = true, .wide = false };
+    // ce cf
+    table[0xce] = MnemonicDecoder {};
+    table[0xcf] = MnemonicDecoder {};
     // d0 d1 d2 d3
     for ( unsigned char i { 0xd0 }; i < 0xd4; ++i )
         table[i] = shift;
     // d4 d5
-    table[0xd4] = MnemonicDecoder { .nr_bytes = 2 };
-    table[0xd5] = MnemonicDecoder { .nr_bytes = 2 };
+    table[0xd4] = MnemonicDecoder { .header_bytes = 2 };
+    table[0xd5] = MnemonicDecoder { .header_bytes = 2 };
     // d7
     table[0xd7] = MnemonicDecoder {};
     // e0 e1 e2 e3
@@ -473,9 +507,14 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0xe4 | i] = in_out;
         table[0xec | i] = in_out;
     }
+    // f0
+    table[0xf0] = prefix;
     // f2 f3
     table[0xf2] = repeat;
     table[0xf3] = repeat;
+    // f4 f5
+    table[0xf4] = MnemonicDecoder {};
+    table[0xf5] = MnemonicDecoder {};
     // f6 f7
     table[0xf6] = group_r_m;
     table[0xf7] = group_r_m;
