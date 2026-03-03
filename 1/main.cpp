@@ -254,19 +254,40 @@ struct MnemonicDecoder {
 
 
 std::string move_immediate_reg( unsigned char const *& instruction ) {
-    struct Instruction {
-        // Only byte
+    struct HeaderByte {
         unsigned char reg : 3;
         unsigned char w : 1;
         unsigned char opcode : 4;
     };
-    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+    auto const values { reinterpret_cast<HeaderByte const *>( instruction ) };
     ++instruction;
 
     unsigned char const destination ( (values->w << 3) | values->reg );
     int const source { get_value( instruction, values->w, true ) };
 
     return std::format( "mov {}, {}", reg_names[destination], source );
+}
+
+
+std::string move_r_m_seg( unsigned char const *& instruction ) {
+    struct Instruction {
+        // First byte
+        unsigned char zero : 1;
+        unsigned char d : 1;
+        unsigned char opcode : 6;
+        // Second byte
+        unsigned char r_m : 3;
+        unsigned char seg_reg : 2;
+        unsigned char zero2 : 1;
+        unsigned char mod : 2;
+    };
+    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+
+    instruction += sizeof( Instruction );
+    std::string const destination { get_r_m_name( values->r_m, values->mod, true, instruction ) };
+    std::string const source { seg_reg_names[values->seg_reg] };
+
+    return std::format( "mov {}, {}", destination, source );
 }
  
 
@@ -294,13 +315,14 @@ std::string group_r_m( unsigned char const *& instruction ) {
     instruction += sizeof( Instruction );
     std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
 
-    bool hide_type { false };
-    if ( values->mod == 0b11 )
-        hide_type = true;
-    if ( values->opcode == 0b111'1111 and values->subop > 0b001 and values->subop < 0b110 )
-        hide_type = true;
-    // bool const hide_type { (values->opcode == 0b111'1111 and values->subop > 0b001) or (values->mod == 0b11) };
-    std::string const value_type { hide_type ? "" : values->w ? "word " : "byte " };
+    bool const simple_mod { values->mod == 0b11 };
+    bool const call_or_jmp { values->opcode == 0b111'1111 and (values->subop & 0b100) ^ ((values->subop & 0b010) << 1) };
+
+    std::string value_type {};
+    if ( call_or_jmp )
+        value_type = values->subop & 1 ? "far " : "";
+    else if ( not simple_mod )
+        value_type = values->w ? "word " : "byte ";
 
     if ( values->opcode == 0b1111'011 and values->subop == 0b000 ) { // Special case: test instruction
         int const test_value { get_value( instruction, values->w, true ) };
@@ -420,11 +442,38 @@ std::string escape( unsigned char const *& instruction ) {
     auto const values { reinterpret_cast<Instruction const *>( instruction ) };
 
     std::string const mnemonic { get_mnemonic( instruction ) };
+    instruction += sizeof( Instruction );
     std::string const source { get_r_m_name( values->r_m, values->mod, true, instruction ) };
 
     if ( values->op2 == 0b111 )
         return "esc";
     return std::format( "esc {}, {}", (values->op1 << 3 | values->op2), source );
+}
+
+
+std::string direct_segment( unsigned char const *& instruction ) {
+    struct HeaderByte {
+        unsigned char one : 1;
+        unsigned char unwide : 1;
+        unsigned char opcode: 6;
+    };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    instruction += sizeof( HeaderByte );
+    int const ip_inc { get_value( instruction, not header->unwide, false ) };
+
+    return std::format( "{} {}", mnemonic, ip_inc );
+}
+
+
+std::string direct_intersegment( unsigned char const *& instruction ) {
+    std::string const mnemonic { get_mnemonic( instruction ) };
+    ++instruction;
+    int const ip { get_value( instruction, true, true ) };
+    int const cs { get_value( instruction, true, true ) };
+
+    return std::format( "{} {}:{}", mnemonic, cs, ip );
 }
 
 
@@ -449,6 +498,7 @@ std::string segment_override( unsigned char const *& instruction ) {
     std::string result { decode( ++instruction ) };
     std::string const segment { seg_reg_names[header->seg] + ':' };
 
+    // Insert the segment register name right before the memory address, which starts with [
     auto const mem_location { std::find( result.cbegin(), result.cend(), '[') };
     result.insert( mem_location, segment.cbegin(), segment.cend() );
     return result;
@@ -475,7 +525,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 27 2f 37 3f
     for ( unsigned char i { 0b000 }; i < 0b100; ++i )
         table[0b0010'0111 | (i << 3)] = MnemonicDecoder {};
-    // 2e
+    // 26 2e 36 3e
     for ( unsigned char i { 0b000 }; i < 0b100; ++i )
         table[0b0010'0110 | (i << 3)] = segment_override;
     // 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f
@@ -490,55 +540,44 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     // 84 85 86 87 88 89 8a 8b
     for ( unsigned char i { 0x84 }; i < 0x8c; ++i )
         table[i] = RmToRegDecoder {};
-    // 8d
+    table[0x8c] = move_r_m_seg;
     table[0x8d] = RmToRegDecoder { .force_swap = true };
-    // 8f
+    table[0x8e] = move_r_m_seg;
     table[0x8f] = group_r_m;
     // 90 91 92 93 94 95 96 97
     for ( unsigned char i { 0x90 }; i < 0x98; ++i )
         table[i] = exchange_reg_imm;
-    // 98 99
     table[0x98] = MnemonicDecoder {};
     table[0x99] = MnemonicDecoder {};
+    table[0x9a] = direct_intersegment;
     // 9b 9c 9d 9e 9f
     for ( unsigned char i { 0x9b }; i < 0xa0; ++i )
         table[i] = MnemonicDecoder {};
     // a0 a1 a2 a3
     for ( unsigned char i { 0xa0 }; i < 0xa4; ++i )
         table[i] = ImmToAccumDecoder { .bracketed = true };
-    // a8 a9
     table[0xa8] = ImmToAccumDecoder {};
     table[0xa9] = ImmToAccumDecoder {};
     // b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bf
     for ( unsigned char i { 0xb0 }; i < 0xc0; ++i )
         table[i] = move_immediate_reg;
-    // c2
     table[0xc2] = MnemonicDecoder { .has_value = true };
-    // c3
     table[0xc3] = MnemonicDecoder {};
-    // c4 c5
     table[0xc4] = RmToRegDecoder { .force_swap = true, .force_wide = true };
     table[0xc5] = RmToRegDecoder { .force_swap = true, .force_wide = true };
-    // c6 c7
     table[0xc6] = ImmToRmDecoder { .mid_type = true };
     table[0xc7] = ImmToRmDecoder { .mid_type = true };
-    // ca
     table[0xca] = MnemonicDecoder { .has_value = true };
-    // cb cc
     table[0xcb] = MnemonicDecoder {};
     table[0xcc] = MnemonicDecoder {};
-    // cd
     table[0xcd] = MnemonicDecoder { .has_value = true, .wide = false };
-    // ce cf
     table[0xce] = MnemonicDecoder {};
     table[0xcf] = MnemonicDecoder {};
     // d0 d1 d2 d3
     for ( unsigned char i { 0xd0 }; i < 0xd4; ++i )
         table[i] = shift;
-    // d4 d5
     table[0xd4] = MnemonicDecoder { .header_bytes = 2 };
     table[0xd5] = MnemonicDecoder { .header_bytes = 2 };
-    // d7
     table[0xd7] = MnemonicDecoder {};
     // d8 d9 da db dc dd de
     for ( unsigned char i { 0xd8 }; i < 0xdf; ++i )
@@ -551,21 +590,20 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0xe4 | i] = in_out;
         table[0xec | i] = in_out;
     }
-    // f0
+    table[0xe8] = direct_segment;
+    table[0xe9] = direct_segment;
+    table[0xea] = direct_intersegment;
+    table[0xeb] = direct_segment;
     table[0xf0] = prefix;
-    // f2 f3
     table[0xf2] = repeat;
     table[0xf3] = repeat;
-    // f4 f5
     table[0xf4] = MnemonicDecoder {};
     table[0xf5] = MnemonicDecoder {};
-    // f6 f7
     table[0xf6] = group_r_m;
     table[0xf7] = group_r_m;
     // f8 f9 fa fb fc fd
     for ( unsigned char i { 0xf8 }; i < 0xfe; ++i )
         table[i] = MnemonicDecoder {};
-    // fe ff
     table[0xfe] = group_r_m;
     table[0xff] = group_r_m;
 
