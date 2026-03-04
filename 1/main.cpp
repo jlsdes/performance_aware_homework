@@ -252,7 +252,27 @@ struct ImmToAccumDecoder {
 };
 
 
-/// Decodes a simple instruction that either has no operand, or just one value in the following byte(s).
+/// Decodes instructions that have the structure defined in the 'Instruction' struct below. These operate on
+/// single byte instructions that have the register ID within that first byte.
+/// The 'operand' attribute can be used to add a static operand between the mnemonic and the register name.
+struct SingleRegDecoder {
+    std::string operand { "" };
+
+    std::string operator()( unsigned char const *& instruction ) {
+        struct HeaderByte {
+            unsigned char reg : 3;
+            unsigned char opcode : 5;
+        };
+        auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+        std::string const mnemonic { get_mnemonic( instruction ) };
+        ++instruction;
+        return std::format( "{} {}{}", mnemonic, operand, reg_names[0b1000 | header->reg] );
+    };
+};
+
+
+/// Decodes simple instructions that either have no operand, or just one value in the following byte(s).
 struct MnemonicDecoder {
     unsigned int header_bytes { 1 };
     bool has_value { false };
@@ -269,7 +289,7 @@ struct MnemonicDecoder {
 };
 
 
-/// Decodes a move instruction that simply moves an immediate value into a register.
+/// Decodes move instructions that simply move an immediate value into a register.
 std::string move_immediate_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char reg : 3;
@@ -286,7 +306,7 @@ std::string move_immediate_reg( unsigned char const *& instruction ) {
 }
 
 
-/// Decodes a move instruction that uses a segment register.
+/// Decodes move instructions that use a segment register.
 std::string move_r_m_seg( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
@@ -309,7 +329,7 @@ std::string move_r_m_seg( unsigned char const *& instruction ) {
 }
  
 
-/// Decodes a conditional jump instruction. The offset values are relative to the end of the instruction in
+/// Decodes conditional jump instructions. The offset values are relative to the end of the instruction in
 /// machine code, but to the start of the instruction in assembly, so we still need to add 2 to get correct
 /// offsets. (All instructions that are decoded by this function are exactly 2 bytes large.)
 /// Also, there is a post-processing step where these offsets are converted into labels if possible.
@@ -356,20 +376,7 @@ std::string group_r_m( unsigned char const *& instruction ) {
 }
 
 
-/// Decodes instructions that are part of the group 1 or group 2 sets, and that only operate on a register.
-std::string group_reg( unsigned char const *& instruction ) {
-    struct HeaderByte {
-        unsigned char reg : 3;
-        unsigned char opcode : 5;
-    };
-    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
-
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    ++instruction;
-    return std::format( "{} {}", mnemonic, reg_names[0b0000'1000 | header->reg] );
-}
-
-
+/// Decodes push and pop instructions that operate on segment registers.
 std::string push_pop_seg_reg( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char op1 : 3;
@@ -384,18 +391,7 @@ std::string push_pop_seg_reg( unsigned char const *& instruction ) {
 }
 
 
-std::string exchange_reg_imm( unsigned char const *& instruction ) {
-    struct HeaderByte {
-        unsigned char reg : 3;
-        unsigned char opcode : 5;
-    };
-    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
-
-    ++instruction;
-    return std::format( "xchg ax, {}", reg_names[0b0000'1000 | header->reg] );
-};
-
-
+/// Decodes in and out instructions.
 std::string in_out( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char w : 1;
@@ -417,6 +413,7 @@ std::string in_out( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes instructions that are part of the shift set.
 std::string shift( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
@@ -440,6 +437,7 @@ std::string shift( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes rep instructions.
 std::string repeat( unsigned char const *& instruction ) {
     struct SecondByte {
         unsigned char w : 1;
@@ -454,6 +452,8 @@ std::string repeat( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes esc instructions. Apparently nasm doesn't recognise these instructions, so this function has not
+/// been tested at all.
 std::string escape( unsigned char const *& instruction ) {
     struct Instruction {
         // First byte
@@ -476,7 +476,8 @@ std::string escape( unsigned char const *& instruction ) {
 }
 
 
-std::string direct_segment( unsigned char const *& instruction ) {
+/// Decodes jmp and call instructions that jump a constant distance within the same segment.
+std::string direct_intrasegment( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char one : 1;
         unsigned char unwide : 1;
@@ -492,6 +493,7 @@ std::string direct_segment( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes jmp and call instructions that jump a constant distance to another segment.
 std::string direct_intersegment( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     ++instruction;
@@ -502,9 +504,10 @@ std::string direct_intersegment( unsigned char const *& instruction ) {
 }
 
 
-// Forward declaration for prefix() to work with
+/// Forward declaration for prefix() to work with
 std::string decode( unsigned char const *& instruction );
 
+/// Decodes a lock instruction, which is written as a prefix to the next instruction.
 std::string prefix( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     ++instruction;
@@ -512,6 +515,7 @@ std::string prefix( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes a segment instruction, which overrides the segment used in the next instruction.
 std::string segment_override( unsigned char const *& instruction ) {
     struct HeaderByte {
         unsigned char op1 : 3;
@@ -530,6 +534,7 @@ std::string segment_override( unsigned char const *& instruction ) {
 }
 
 
+/// Creates a decoding table with functions/functors to handle every supported byte value.
 std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr decoding_table() {
     std::array<std::function<std::string(unsigned char const *&)>, 256> table { nullptr };
 
@@ -555,7 +560,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0b0010'0110 | (i << 3)] = segment_override;
     // 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f
     for ( unsigned char i { 0x40 }; i < 0x60; ++i )
-        table[i] = group_reg;
+        table[i] = SingleRegDecoder {};
     // 70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f
     for ( unsigned char i { 0x70 }; i < 0x80; ++i )
         table[i] = jump_conditional;
@@ -571,7 +576,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
     table[0x8f] = group_r_m;
     // 90 91 92 93 94 95 96 97
     for ( unsigned char i { 0x90 }; i < 0x98; ++i )
-        table[i] = exchange_reg_imm;
+        table[i] = SingleRegDecoder { .operand = "ax, " };
     table[0x98] = MnemonicDecoder {};
     table[0x99] = MnemonicDecoder {};
     table[0x9a] = direct_intersegment;
@@ -621,10 +626,10 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
         table[0xe4 | i] = in_out;
         table[0xec | i] = in_out;
     }
-    table[0xe8] = direct_segment;
-    table[0xe9] = direct_segment;
+    table[0xe8] = direct_intrasegment;
+    table[0xe9] = direct_intrasegment;
     table[0xea] = direct_intersegment;
-    table[0xeb] = direct_segment;
+    table[0xeb] = direct_intrasegment;
     table[0xf0] = prefix;
     table[0xf2] = repeat;
     table[0xf3] = repeat;
@@ -657,6 +662,7 @@ std::array<std::function<std::string(unsigned char const *&)>, 256> constexpr de
 };
 
 
+/// Decodes a single instruction (or 2 if the first one is a prefix instruction).
 std::string decode( unsigned char const *& instruction ) {
     static auto const table { decoding_table() };
 
@@ -668,6 +674,9 @@ std::string decode( unsigned char const *& instruction ) {
 }
 
 
+/// Decodes all instructions in the given array, and prints them to the console in assembly language. The
+/// original bytes are also written next to their respective assembly lines as comments. This function returns
+/// a Boolean indicating whether the decoding was a success.
 bool decode_all( unsigned char const * const instructions, unsigned char const * const end ) {
     std::vector<std::string> assembly {};
     std::vector<std::string> bytes {};
