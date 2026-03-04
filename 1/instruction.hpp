@@ -4,6 +4,7 @@
 #include <functional>
 #include <ostream>
 #include <string>
+#include <sstream>
 #include <variant>
 
 
@@ -11,6 +12,31 @@ struct Register {
     unsigned char base : 3; // The final two identifier bits.
     bool w : 1; // Whether the register is wide (true) or not (false).
     bool empty : 1; // Whether the register value is empty, only used for EffectiveAddress stuff.
+};
+
+
+enum RegName {
+    RegA,
+    RegC,
+    RegD,
+    RegB,
+    RegSP,
+    RegBP,
+    RegSI,
+    RegDI
+};
+
+
+struct SegmentRegister {
+    unsigned char base : 2;
+};
+
+
+enum SegRegName {
+    SegRegES,
+    SegRegCS,
+    SegRegSS,
+    SegRegDS,
 };
 
 
@@ -22,11 +48,12 @@ struct EffectiveAddress {
 
 using None = std::nullptr_t;
 
-using Operand = std::variant<None, Register, EffectiveAddress, int>;
+using Operand = std::variant<None, Register, SegmentRegister, EffectiveAddress, int>;
 
 enum OperandTypes {
     NoOperand,
     RegisterOperand,
+    SegRegOperand,
     AddressOperand,
     ImmediateOperand,
 };
@@ -121,6 +148,11 @@ inline std::ostream & operator<<( std::ostream & lhs, Register const & rhs ) {
 }
 
 
+inline std::ostream & operator<<( std::ostream & lhs, SegmentRegister const & rhs ) {
+    return lhs << seg_reg_names[rhs.base];
+}
+
+
 inline std::ostream & operator<<( std::ostream & lhs, EffectiveAddress const & rhs ) {
     lhs << '[';
 
@@ -144,12 +176,12 @@ inline std::ostream & operator<<( std::ostream & lhs, EffectiveAddress const & r
 
 
 inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) {
-    lhs << rhs.name;
+    lhs << rhs.name << ' ';
 
     bool first { true };
 
     for ( unsigned int i { 0 }; i < 2; ++i ) {
-        if ( std::holds_alternative<None>( rhs.operands[i] ) )
+        if ( std::holds_alternative<None>( rhs.operands[i] ))
             continue;
 
         if ( not first )
@@ -159,6 +191,10 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
         switch ( rhs.operands[i].index() ) {
         case RegisterOperand:
             lhs << std::get<RegisterOperand>( rhs.operands[i] );
+            break;
+
+        case SegRegOperand:
+            lhs << std::get<SegRegOperand>( rhs.operands[i] );
             break;
 
         case AddressOperand:
@@ -174,5 +210,12 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
         }
     }
     return lhs;
+}
+
+
+inline std::string to_string( Instruction const & instruction ) {
+    std::stringstream stream {};
+    stream << instruction;
+    return stream.str();
 }
 

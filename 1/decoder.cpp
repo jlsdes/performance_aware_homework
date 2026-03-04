@@ -1,4 +1,5 @@
 #include "decoder.hpp"
+#include "instruction.hpp"
 
 #include <format>
 #include <functional>
@@ -317,9 +318,9 @@ Instruction push_pop_seg_reg( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    ++instruction;
-    return { std::format( "{} {}", mnemonic, seg_reg_names[header->seg_reg] ) };
+    Instruction result { get_mnemonic( instruction++ ) };
+    result.operands[0] = SegmentRegister { header->seg_reg };
+    return result;
 }
 
 
@@ -334,14 +335,16 @@ Instruction in_out( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    instruction += sizeof( HeaderByte );
-    std::string destination { header->w ? "ax" : "al" };
-    std::string source { header->variable ? "dx" : std::to_string( get_value( instruction, false, false ) ) };
-    if ( header->d )
-        std::swap( destination, source );
+    Instruction result {};
+    result.name = get_mnemonic( instruction++ );
 
-    return { std::format( "{} {}, {}", mnemonic, destination, source ) };
+    result.operands[header->d] = Register { RegA, bool( header->w ) };
+    if ( header->variable )
+        result.operands[1 - header->d] = Register { RegD, true };
+    else
+        result.operands[1 - header->d] = get_value( instruction, false, false );
+
+    return result;
 }
 
 
@@ -624,7 +627,7 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
     bool success { true };
     while ( instruction != end ) {
         Instruction result { decode( instruction ) };
-        std::string const result_str { result.name };
+        std::string const result_str { to_string( result ) };
 
         if ( instruction == previous ) {
             assembly.push_back( "The decoder failed to read any data, aborting." );
@@ -643,7 +646,6 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
             // For these large offsets, the actual destination can still be computed however.
             if ( label_id <= end - instructions ) {
                 labels.emplace( label_id );
-                // TODO do this properly
                 result.name = std::format( "{}label_{}", result_str.substr( 0, loc ), label_id );
             } else {
                 result.name = std::format( "{}{}", result_str.substr( 0, loc ), label_id );
@@ -680,3 +682,4 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
     }
     return success;
 }
+
