@@ -81,6 +81,27 @@ std::string get_r_m_name( unsigned char const r_m,
 };
 
 
+Operand get_r_m( unsigned char const r_m,
+                 unsigned char const mod,
+                 unsigned char const w,
+                 unsigned char const *& instruction ) {
+    if ( mod == 0b11 ) // r_m represents a register
+        return Register { r_m, w };
+
+    bool const direct_address { mod == 0b00 and r_m == 0b110 };
+    bool const no_displacement { mod == 0b00 and r_m != 0b110 };
+    bool const wide_displacement { mod == 0b10 or direct_address };
+    int const displacement { no_displacement ? 0 : get_value( instruction, wide_displacement, true ) };
+
+    if ( direct_address )
+        return EffectiveAddress { .regs = { empty_register }, .offset = displacement };
+
+    EffectiveAddress result { address_sums[r_m] };
+    result.offset = displacement;
+    return result;
+};
+
+
 /// Decodes instructions that have the structure defined in the 'Instruction' struc below. These operate on either
 /// two registers, or one register and a memory location.
 /// This 'force_swap' attribute forces the 'd' bit to be ignored, and to always swap the source and destination.
@@ -91,7 +112,7 @@ struct RmToRegDecoder {
     bool force_wide { false };
 
     Instruction operator()( unsigned char const *& instruction ) {
-        struct Instruction {
+        struct HeaderBytes {
             // First byte
             unsigned char w : 1;
             unsigned char d : 1;
@@ -101,19 +122,25 @@ struct RmToRegDecoder {
             unsigned char reg : 3;
             unsigned char mod : 2;
         };
-        auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+        auto const values { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
         bool const wide { force_wide or values->w };
         bool const swap { force_swap or values->d };
 
-        std::string const mnemonic { get_mnemonic( instruction ) };
-        instruction += sizeof( Instruction );
-        std::string source { reg_names[(wide << 3) | values->reg] };
-        std::string destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
-        if ( swap )
-            std::swap( source, destination );
+        Instruction result { get_mnemonic( instruction++ ) };
+        result.operands[swap ? 1 : 0] = Register { values->reg, wide, false };
+        result.operands[swap ? 0 : 1] = get_r_m( values->r_m, values->mod, values->w, instruction );
 
-        return { std::format( "{} {}, {}", mnemonic, destination, source ) };
+        return result;
+
+//        std::string const mnemonic { get_mnemonic( instruction ) };
+//        instruction += sizeof( Instruction );
+//        std::string source { reg_names[(wide << 3) | values->reg] };
+//        std::string destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+//        if ( swap )
+//            std::swap( source, destination );
+//
+//        return { std::format( "{} {}, {}", mnemonic, destination, source ) };
     }
 };
 

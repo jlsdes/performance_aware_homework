@@ -10,12 +10,15 @@
 
 struct Register {
     unsigned char base : 3; // The final two identifier bits.
-    bool w : 1; // Whether the register is wide (true) or not (false).
+    unsigned char w : 1; // Whether the register is wide (true) or not (false).
     bool empty : 1; // Whether the register value is empty, only used for EffectiveAddress stuff.
 };
 
 
-enum RegName {
+Register constexpr empty_register { 0, 0, true };
+
+
+enum RegName : unsigned char {
     RegA,
     RegC,
     RegD,
@@ -32,7 +35,7 @@ struct SegmentRegister {
 };
 
 
-enum SegRegName {
+enum SegRegName : unsigned char {
     SegRegES,
     SegRegCS,
     SegRegSS,
@@ -89,6 +92,18 @@ StringTable<8> constexpr reg_sums {
     "di",
     "bp",
     "bx",
+};
+
+
+EffectiveAddress constexpr address_sums[8] {
+    { { { RegB, 1 }, { RegSI, 1 } } },
+    { { { RegB, 1 }, { RegDI, 1 } } },
+    { { { RegBP, 1 }, { RegSI, 1 } } },
+    { { { RegBP, 1 }, { RegDI, 1 } } },
+    { { { RegSI, 1 }, empty_register } },
+    { { { RegDI, 1 }, empty_register } },
+    { { { RegBP, 1 }, empty_register } },
+    { { { RegB, 1 }, empty_register } },
 };
 
 
