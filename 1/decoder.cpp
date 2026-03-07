@@ -176,10 +176,10 @@ struct ImmToRmDecoder {
 
 /// Decodes instructions that have the structure defined in the 'Instruction' struct below. These operate on
 /// an accumulator register and a register or memory location.
-/// The 'bracketed' attribute indicates whether the following byte(s) contain a memory location or an actual
+/// The 'address' attribute indicates whether the following byte(s) contain a memory location or an actual
 /// immediate value.
 struct ImmToAccumDecoder {
-    bool bracketed { false };
+    bool address { false };
 
     Instruction operator()( unsigned char const *& instruction ) {
         struct HeaderByte {
@@ -189,16 +189,17 @@ struct ImmToAccumDecoder {
         };
         auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-        std::string const mnemonic { get_mnemonic( instruction ) };
-        instruction += sizeof( HeaderByte );
-        std::string source { std::to_string( get_value( instruction, header->w, true ) ) };
-        if ( bracketed )
-            source = '[' + source + ']';
-        std::string destination { header->w ? "ax" : "al" };
-        if ( header->d )
-            std::swap( source, destination );
+        int const op_a { header->d ? 1 : 0 };
 
-        return { instruction, std::format( "{} {}, {}", mnemonic, destination, source ) };
+        Instruction result { instruction, get_mnemonic( instruction ) };
+        ++instruction;
+        int const value { get_value( instruction, header->w, true ) };
+
+        result.operands[header->d ? 1 : 0] = Register { RegA, header->w };
+        result.operands[header->d ? 0 : 1] = address ? Operand { direct_address( value ) }
+                                                     : Operand { Immediate ( value, header->w ) };
+
+        return result;
     }
 };
 
@@ -542,7 +543,7 @@ std::array<DecoderFunction, 256> constexpr decoding_table() {
         table[i] = MnemonicDecoder {};
     // a0 a1 a2 a3
     for ( unsigned char i { 0xa0 }; i < 0xa4; ++i )
-        table[i] = ImmToAccumDecoder { .bracketed = true };
+        table[i] = ImmToAccumDecoder { .address = true };
     // a4 a5 a6 a7
     for ( unsigned char i { 0xa4 }; i < 0xa8; ++i )
         table[i] = MnemonicDecoder {};
