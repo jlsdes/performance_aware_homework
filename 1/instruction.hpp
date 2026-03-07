@@ -107,6 +107,11 @@ EffectiveAddress constexpr address_sums[8] {
 };
 
 
+inline EffectiveAddress constexpr direct_address( int const displacement ) {
+    return { .regs = { empty_register, empty_register }, .offset = displacement };
+}
+
+
 // Segment register names
 StringTable<4> constexpr seg_reg_names {
     "es",
