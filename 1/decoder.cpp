@@ -56,6 +56,10 @@ inline int get_value( unsigned char const *& instruction, bool const w, bool con
     }
 }
 
+inline Immediate get_immediate( unsigned char const *& instruction, bool const w, bool const s ) {
+    return { get_value( instruction, w, s), w };
+}
+
 
 /// Returns the register name or memory location targetted by the instruction parameters.
 /// This function expects the 'instruction' argument to have been advanced past the 2 instruction header bytes,
@@ -127,7 +131,7 @@ struct RmToRegDecoder {
         bool const wide { force_wide or values->w };
         bool const swap { force_swap or values->d };
 
-        Instruction result { get_mnemonic( instruction ) };
+        Instruction result { instruction, get_mnemonic( instruction ) };
         instruction += 2;
         result.operands[swap ? 1 : 0] = get_r_m( values->r_m, values->mod, values->w, instruction );
         result.operands[swap ? 0 : 1] = Register { values->reg, wide, false };
@@ -142,10 +146,10 @@ struct RmToRegDecoder {
 /// The 'mid_type' attribute indicates whether the type keywords "word" and "byte" should be placed in the
 /// middle of the instructions (e.g. mov [bp + di], byte 7) rather than at the start (e.g. add byte [bx], 34).
 struct ImmToRmDecoder {
-    bool mid_type { false };
+    bool is_move { false };
 
     Instruction operator()( unsigned char const *& instruction ) {
-        struct Instruction {
+        struct HeaderBytes {
             // First byte
             unsigned char w : 1;
             unsigned char s : 1;
@@ -155,22 +159,17 @@ struct ImmToRmDecoder {
             unsigned char subop : 3;
             unsigned char mod : 2;
         };
-        auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+        auto const values { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
-        std::string const mnemonic { get_mnemonic( instruction ) };
-        instruction += sizeof( Instruction );
-        std::string const destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
-        std::string const source_type { values->w ? "word" : "byte" };
+        bool const wide { (is_move or values->s == 0) and values->w == 1 };
 
-        if ( mid_type ) {
-            int const source { get_value( instruction, values->w, values->s ) };
-            return { std::format( "{} {}, {} {}", mnemonic, destination, source_type, source ) };
-        }
-        int const source { get_value( instruction, values->s == 0 and values->w == 1, values->s ) };
-        if ( values->mod == 0b11 )
-            return { std::format( "{} {}, {}", mnemonic, destination, source ) };
-        else
-            return { std::format( "{} {} {}, {}", mnemonic, source_type, destination, source ) };
+        Instruction result { instruction, get_mnemonic( instruction ) };
+        instruction += 2;
+        result.operands[0] = get_r_m( values->r_m, values->mod, values->w, instruction );
+        result.operands[1] = get_immediate( instruction, wide, values->s );
+        result.write_size = values->mod != 0b11;
+
+        return result;
     }
 };
 
@@ -199,7 +198,7 @@ struct ImmToAccumDecoder {
         if ( header->d )
             std::swap( source, destination );
 
-        return { std::format( "{} {}, {}", mnemonic, destination, source ) };
+        return { instruction, std::format( "{} {}, {}", mnemonic, destination, source ) };
     }
 };
 
@@ -219,7 +218,7 @@ struct SingleRegDecoder {
 
         std::string const mnemonic { get_mnemonic( instruction ) };
         ++instruction;
-        return { std::format( "{} {}{}", mnemonic, operand, reg_names[0b1000 | header->reg] ) };
+        return { instruction, std::format( "{} {}{}", mnemonic, operand, reg_names[0b1000 | header->reg] ) };
     };
 };
 
@@ -235,8 +234,8 @@ struct MnemonicDecoder {
         std::string const mnemonic { get_mnemonic( instruction ) };
         instruction += header_bytes;
         if ( has_value )
-            return { std::format( "{} {}", mnemonic, get_value( instruction, wide, sign ) ) };
-        return { mnemonic };
+            return { instruction, std::format( "{} {}", mnemonic, get_value( instruction, wide, sign ) ) };
+        return { instruction, mnemonic };
     };
 };
 
@@ -254,7 +253,7 @@ Instruction move_immediate_reg( unsigned char const *& instruction ) {
     unsigned char const destination ( (values->w << 3) | values->reg );
     int const source { get_value( instruction, values->w, true ) };
 
-    return { std::format( "mov {}, {}", reg_names[destination], source ) };
+    return { instruction, std::format( "mov {}, {}", reg_names[destination], source ) };
 }
 
 
@@ -277,7 +276,7 @@ Instruction move_r_m_seg( unsigned char const *& instruction ) {
     std::string const destination { get_r_m_name( values->r_m, values->mod, true, instruction ) };
     std::string const source { seg_reg_names[values->seg_reg] };
 
-    return { std::format( "mov {}, {}", destination, source ) };
+    return { instruction, std::format( "mov {}, {}", destination, source ) };
 }
  
 
@@ -289,7 +288,7 @@ Instruction jump_conditional( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction ) };
     int const offset { get_value( ++instruction, false, true ) };
 
-    return { std::format( "{} ${:+}", mnemonic, offset + 2 ) };
+    return { instruction, std::format( "{} ${:+}", mnemonic, offset + 2 ) };
 }
 
 
@@ -322,9 +321,9 @@ Instruction group_r_m( unsigned char const *& instruction ) {
 
     if ( values->opcode == 0b1111'011 and values->subop == 0b000 ) { // Special case: test instruction
         int const test_value { get_value( instruction, values->w, true ) };
-        return { std::format( "{} {}{}, {}", mnemonic, value_type, r_m, test_value ) };
+        return { instruction, std::format( "{} {}{}, {}", mnemonic, value_type, r_m, test_value ) };
     }
-    return { std::format( "{} {}{}", mnemonic, value_type, r_m ) };
+    return { instruction, std::format( "{} {}{}", mnemonic, value_type, r_m ) };
 }
 
 
@@ -337,7 +336,7 @@ Instruction push_pop_seg_reg( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    Instruction result { get_mnemonic( instruction++ ) };
+    Instruction result { instruction, get_mnemonic( instruction++ ) };
     result.operands[0] = SegmentRegister { header->seg_reg };
     return result;
 }
@@ -361,7 +360,7 @@ Instruction in_out( unsigned char const *& instruction ) {
     if ( header->variable )
         result.operands[1 - header->d] = Register { RegD, true };
     else
-        result.operands[1 - header->d] = get_value( instruction, false, false );
+        result.operands[1 - header->d] = get_immediate( instruction, false, false );
 
     return result;
 }
@@ -387,7 +386,7 @@ Instruction shift( unsigned char const *& instruction ) {
     std::string const value_type { values->mod == 0b11 ? "" : values->w ? "word " : "byte " };
     std::string const destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
 
-    return { std::format( "{} {}{}, {}", mnemonic, value_type, destination, source ) };
+    return { instruction, std::format( "{} {}{}, {}", mnemonic, value_type, destination, source ) };
 }
 
 
@@ -402,7 +401,7 @@ Instruction repeat( unsigned char const *& instruction ) {
     std::string const mnemonic { get_mnemonic( instruction++ ) };
     std::string const name { get_mnemonic( instruction++ ) };
 
-    return { std::format( "{} {}{}", mnemonic, name, values->w ? 'w' : 'b' ) };
+    return { instruction, std::format( "{} {}{}", mnemonic, name, values->w ? 'w' : 'b' ) };
 }
 
 
@@ -425,8 +424,8 @@ Instruction escape( unsigned char const *& instruction ) {
     std::string const source { get_r_m_name( values->r_m, values->mod, true, instruction ) };
 
     if ( values->op2 == 0b111 )
-        return { "esc" };
-    return { std::format( "esc {}, {}", (values->op1 << 3 | values->op2), source ) };
+        return { instruction, "esc" };
+    return { instruction, std::format( "esc {}, {}", (values->op1 << 3 | values->op2), source ) };
 }
 
 
@@ -443,7 +442,7 @@ Instruction direct_intrasegment( unsigned char const *& instruction ) {
     instruction += sizeof( HeaderByte );
     int const ip_inc { get_value( instruction, not header->unwide, false ) };
 
-    return { std::format( "{} ${:+}", mnemonic, ip_inc + 3 ) };
+    return { instruction, std::format( "{} ${:+}", mnemonic, ip_inc + 3 ) };
 }
 
 
@@ -454,7 +453,7 @@ Instruction direct_intersegment( unsigned char const *& instruction ) {
     int const ip { get_value( instruction, true, true ) };
     int const cs { get_value( instruction, true, true ) };
 
-    return { std::format( "{} {}:{}", mnemonic, cs, ip ) };
+    return { instruction, std::format( "{} {}:{}", mnemonic, cs, ip ) };
 }
 
 
@@ -467,7 +466,7 @@ Instruction prefix( unsigned char const *& instruction ) {
     ++instruction;
     std::stringstream stream {};
     stream << decode( instruction );
-    return { std::format( "{} {}", mnemonic, stream.str() ) };
+    return { instruction, std::format( "{} {}", mnemonic, stream.str() ) };
 }
 
 
@@ -486,7 +485,7 @@ Instruction segment_override( unsigned char const *& instruction ) {
     // Insert the segment register name right before the memory address, which starts with [
     auto const mem_location { std::find( result.cbegin(), result.cend(), '[') };
     result.insert( mem_location, segment.cbegin(), segment.cend() );
-    return { result };
+    return { instruction, result };
 }
 
 
@@ -559,8 +558,8 @@ std::array<DecoderFunction, 256> constexpr decoding_table() {
     table[0xc3] = MnemonicDecoder {};
     table[0xc4] = RmToRegDecoder { .force_swap = true, .force_wide = true };
     table[0xc5] = RmToRegDecoder { .force_swap = true, .force_wide = true };
-    table[0xc6] = ImmToRmDecoder { .mid_type = true };
-    table[0xc7] = ImmToRmDecoder { .mid_type = true };
+    table[0xc6] = ImmToRmDecoder { .is_move = true };
+    table[0xc7] = ImmToRmDecoder { .is_move = true };
     table[0xca] = MnemonicDecoder { .has_value = true };
     table[0xcb] = MnemonicDecoder {};
     table[0xcc] = MnemonicDecoder {};
@@ -628,7 +627,7 @@ Instruction decode( unsigned char const *& instruction ) {
     if ( decoder )
         return decoder( instruction );
 
-    return Instruction { std::format( "Unsupported instruction {:#04x}.", *instruction ) };
+    return Instruction { instruction, std::format( "Unsupported instruction {:#04x}.", *instruction ) };
 }
 
 
@@ -690,14 +689,14 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
             std::println( "label_{}:", byte_counter );
             ++label_iter;
         }
-        // All machine code comments are formatted as " 0x__", i.e. length 5
-        byte_counter += bytes[line].size() / 5;
 
 #if ( 1 ) // Toggle whether the machine code is written as comments next to the generated assembly
-        std::println( "{:40};{}", assembly[line], bytes[line] );
+        std::println( "{:40};{:40}< Byte {}", assembly[line], bytes[line], byte_counter );
 #else
         std::println( "{}", assembly[line] );
 #endif
+        // All machine code comments are formatted as " 0x__", i.e. length 5
+        byte_counter += bytes[line].size() / 5;
     }
     return success;
 }

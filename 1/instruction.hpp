@@ -49,9 +49,15 @@ struct EffectiveAddress {
 };
 
 
+struct Immediate {
+    int value;
+    bool wide;
+};
+
+
 using None = std::nullptr_t;
 
-using Operand = std::variant<None, Register, SegmentRegister, EffectiveAddress, int>;
+using Operand = std::variant<None, Register, SegmentRegister, EffectiveAddress, Immediate>;
 
 enum OperandTypes {
     NoOperand,
@@ -63,11 +69,12 @@ enum OperandTypes {
 
 
 struct Instruction {
+    unsigned char const * bytes;
+
     std::string name;
     Operand operands[2];
 
-    // A (temporary?) hack to keep everything functional
-    std::function<std::string(Instruction const *)> postprocessing { nullptr };
+    bool write_size { false };
 };
 
 
@@ -195,6 +202,11 @@ inline std::ostream & operator<<( std::ostream & lhs, EffectiveAddress const & r
 }
 
 
+inline std::ostream & operator<<( std::ostream & lhs, Immediate const & rhs ) {
+    return lhs << rhs.value;
+}
+
+
 inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) {
     lhs << rhs.name << ' ';
 
@@ -207,6 +219,11 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
         if ( not first )
             lhs << ", ";
         first = false;
+
+        if ( rhs.write_size ) {
+            if ( i == 1 or std::holds_alternative<None>( rhs.operands[1] ) )
+                lhs << ( *rhs.bytes & 1 ? "word " : "byte " );
+        }
 
         switch ( rhs.operands[i].index() ) {
         case RegisterOperand:
