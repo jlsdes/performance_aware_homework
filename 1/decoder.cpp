@@ -208,7 +208,8 @@ struct ImmToAccumDecoder {
 /// single byte instructions that have the register ID within that first byte.
 /// The 'operand' attribute can be used to add a static operand between the mnemonic and the register name.
 struct SingleRegDecoder {
-    std::string operand { "" };
+    bool has_operand { false };
+    Register operand {};
 
     Instruction operator()( unsigned char const *& instruction ) {
         struct HeaderByte {
@@ -217,9 +218,14 @@ struct SingleRegDecoder {
         };
         auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-        std::string const mnemonic { get_mnemonic( instruction ) };
+        Instruction result { instruction, get_mnemonic( instruction ) };
         ++instruction;
-        return { instruction, std::format( "{} {}{}", mnemonic, operand, reg_names[0b1000 | header->reg] ) };
+
+        if ( has_operand )
+            result.operands[0] = operand;
+        result.operands[1] = Register { header->reg, 1 };
+
+        return result;
     };
 };
 
@@ -232,11 +238,13 @@ struct MnemonicDecoder {
     bool sign { true };
 
     Instruction operator()( unsigned char const *& instruction ) {
-        std::string const mnemonic { get_mnemonic( instruction ) };
+        Instruction result { instruction, get_mnemonic( instruction ) };
         instruction += header_bytes;
+
         if ( has_value )
-            return { instruction, std::format( "{} {}", mnemonic, get_value( instruction, wide, sign ) ) };
-        return { instruction, mnemonic };
+            result.operands[0] = get_immediate( instruction, wide, sign);
+
+        return result;
     };
 };
 
@@ -534,7 +542,7 @@ std::array<DecoderFunction, 256> constexpr decoding_table() {
     table[0x8f] = group_r_m;
     // 90 91 92 93 94 95 96 97
     for ( unsigned char i { 0x90 }; i < 0x98; ++i )
-        table[i] = SingleRegDecoder { .operand = "ax, " };
+        table[i] = SingleRegDecoder { .has_operand = true, .operand = Register { RegA, 1 } };
     table[0x98] = MnemonicDecoder {};
     table[0x99] = MnemonicDecoder {};
     table[0x9a] = direct_intersegment;
