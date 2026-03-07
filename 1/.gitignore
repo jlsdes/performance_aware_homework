@@ -5,3 +5,5 @@ resources
 
 temp.asm
 temp
+
+cmp_bytes
