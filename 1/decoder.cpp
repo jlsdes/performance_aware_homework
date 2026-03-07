@@ -10,31 +10,6 @@
 #include <string>
 
 
-/// Returns the mnemonic for the instruction.
-std::string constexpr get_mnemonic( unsigned char const * const instruction ) {
-    switch ( *instruction ) {
-    case 0x80:
-    case 0x81:
-    case 0x82:
-    case 0x83:
-        return immediate_table[(*(instruction + 1) >> 3) & 0b0000'0111];
-    case 0xd0:
-    case 0xd1:
-    case 0xd2:
-    case 0xd3:
-        return shift_table[(*(instruction + 1) >> 3) & 0b0000'0111];
-    case 0xf6:
-    case 0xf7:
-        return group_1_table[(*(instruction + 1) >> 3) & 0b0000'0111];
-    case 0xfe:
-    case 0xff:
-        return group_2_table[(*(instruction + 1) >> 3) & 0b0000'0111];
-    default:
-        return mnemonics[*instruction];
-    }
-}
-
-
 /// Converts 1 or 2 bytes into an integer, and advances the instruction pointer beyond the converted bytes.
 /// 'w' determines the number of bytes (false: 1, true: 2), and 's' determines whether a signed (true) or
 /// unsigned (false) value is read. The returned value is a signed integer either way.
@@ -131,7 +106,7 @@ struct RmToRegDecoder {
         bool const wide { force_wide or values->w };
         bool const swap { force_swap or values->d };
 
-        Instruction result { instruction, get_mnemonic( instruction ) };
+        Instruction result { instruction };
         instruction += 2;
         result.operands[swap ? 1 : 0] = get_r_m( values->r_m, values->mod, values->w, instruction );
         result.operands[swap ? 0 : 1] = Register { values->reg, wide, false };
@@ -163,7 +138,7 @@ struct ImmToRmDecoder {
 
         bool const wide { (is_move or values->s == 0) and values->w == 1 };
 
-        Instruction result { instruction, get_mnemonic( instruction ) };
+        Instruction result { instruction };
         instruction += 2;
         result.operands[0] = get_r_m( values->r_m, values->mod, values->w, instruction );
         result.operands[1] = get_immediate( instruction, wide, values->s );
@@ -191,7 +166,7 @@ struct ImmToAccumDecoder {
 
         int const op_a { header->d ? 1 : 0 };
 
-        Instruction result { instruction, get_mnemonic( instruction ) };
+        Instruction result { instruction };
         ++instruction;
         int const value { get_value( instruction, header->w, true ) };
 
@@ -218,7 +193,7 @@ struct SingleRegDecoder {
         };
         auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-        Instruction result { instruction, get_mnemonic( instruction ) };
+        Instruction result { instruction };
         ++instruction;
 
         if ( has_operand )
@@ -238,7 +213,7 @@ struct MnemonicDecoder {
     bool sign { true };
 
     Instruction operator()( unsigned char const *& instruction ) {
-        Instruction result { instruction, get_mnemonic( instruction ) };
+        Instruction result { instruction };
         instruction += header_bytes;
 
         if ( has_value )
@@ -256,19 +231,19 @@ Instruction move_immediate_reg( unsigned char const *& instruction ) {
         unsigned char w : 1;
         unsigned char opcode : 4;
     };
-    auto const values { reinterpret_cast<HeaderByte const *>( instruction ) };
+    auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
+
+    Instruction result { instruction };
     ++instruction;
-
-    unsigned char const destination ( (values->w << 3) | values->reg );
-    int const source { get_value( instruction, values->w, true ) };
-
-    return { instruction, std::format( "mov {}, {}", reg_names[destination], source ) };
+    result.operands[0] = Register { header->reg, header->w };
+    result.operands[1] = get_immediate( instruction, header->w, true );
+    return result;
 }
 
 
 /// Decodes move instructions that use a segment register.
 Instruction move_r_m_seg( unsigned char const *& instruction ) {
-    struct Instruction {
+    struct HeaderBytes {
         // First byte
         unsigned char zero : 1;
         unsigned char d : 1;
@@ -279,13 +254,13 @@ Instruction move_r_m_seg( unsigned char const *& instruction ) {
         unsigned char zero2 : 1;
         unsigned char mod : 2;
     };
-    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+    auto const values { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
-    instruction += sizeof( Instruction );
-    std::string const destination { get_r_m_name( values->r_m, values->mod, true, instruction ) };
-    std::string const source { seg_reg_names[values->seg_reg] };
-
-    return { instruction, std::format( "mov {}, {}", destination, source ) };
+    Instruction result { instruction };
+    instruction += 2;
+    result.operands[0] = get_r_m( values->r_m, values->mod, true, instruction );
+    result.operands[1] = SegmentRegister { values->seg_reg };
+    return result;
 }
  
 
@@ -345,7 +320,8 @@ Instruction push_pop_seg_reg( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    Instruction result { instruction, get_mnemonic( instruction++ ) };
+    Instruction result { instruction };
+    ++instruction;
     result.operands[0] = SegmentRegister { header->seg_reg };
     return result;
 }

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <functional>
 #include <ostream>
 #include <string>
 #include <sstream>
@@ -169,6 +168,31 @@ StringTable<8> constexpr group_2_table {
 };
 
 
+/// Returns the mnemonic for the instruction.
+inline std::string constexpr get_mnemonic( unsigned char const * const instruction ) {
+    switch ( *instruction ) {
+    case 0x80:
+    case 0x81:
+    case 0x82:
+    case 0x83:
+        return immediate_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    case 0xd0:
+    case 0xd1:
+    case 0xd2:
+    case 0xd3:
+        return shift_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    case 0xf6:
+    case 0xf7:
+        return group_1_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    case 0xfe:
+    case 0xff:
+        return group_2_table[(*(instruction + 1) >> 3) & 0b0000'0111];
+    default:
+        return mnemonics[*instruction];
+    }
+}
+
+
 inline std::ostream & operator<<( std::ostream & lhs, Register const & rhs ) {
     // Ignoring rhs.empty; this should be checked by the caller.
     return lhs << reg_names[rhs.w << 3 | rhs.base];
@@ -208,7 +232,10 @@ inline std::ostream & operator<<( std::ostream & lhs, Immediate const & rhs ) {
 
 
 inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) {
-    lhs << rhs.name << ' ';
+    if ( rhs.name.empty() )
+        lhs << get_mnemonic( rhs.bytes ) << ' ';
+    else
+        lhs << rhs.name << ' ';
 
     bool first { true };
 
