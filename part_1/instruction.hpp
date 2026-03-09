@@ -2,6 +2,7 @@
 
 #include <array>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <sstream>
 #include <variant>
@@ -17,28 +18,8 @@ struct Register {
 Register constexpr empty_register { 0, 0, true };
 
 
-enum RegName : unsigned char {
-    RegA,
-    RegC,
-    RegD,
-    RegB,
-    RegSP,
-    RegBP,
-    RegSI,
-    RegDI
-};
-
-
 struct SegmentRegister {
     unsigned char base : 2;
-};
-
-
-enum SegRegName : unsigned char {
-    SegRegES,
-    SegRegCS,
-    SegRegSS,
-    SegRegDS,
 };
 
 
@@ -54,9 +35,22 @@ struct Immediate {
 };
 
 
+struct JumpAddress {
+    int destination;
+    bool in_bounds { false };
+};
+
+
 using None = std::nullptr_t;
 
-using Operand = std::variant<None, Register, SegmentRegister, EffectiveAddress, Immediate>;
+using Operand = std::variant<
+    None,
+    Register,
+    SegmentRegister,
+    EffectiveAddress,
+    Immediate,
+    JumpAddress
+>;
 
 enum OperandTypes {
     NoOperand,
@@ -64,6 +58,27 @@ enum OperandTypes {
     SegRegOperand,
     AddressOperand,
     ImmediateOperand,
+    JumpOperand,
+};
+
+
+enum RegName : unsigned char {
+    RegA,
+    RegC,
+    RegD,
+    RegB,
+    RegSP,
+    RegBP,
+    RegSI,
+    RegDI
+};
+
+
+enum SegRegName : unsigned char {
+    SegRegES,
+    SegRegCS,
+    SegRegSS,
+    SegRegDS,
 };
 
 
@@ -231,6 +246,13 @@ inline std::ostream & operator<<( std::ostream & lhs, Immediate const & rhs ) {
 }
 
 
+inline std::ostream & operator<<( std::ostream & lhs, JumpAddress const & rhs ) {
+    if ( rhs.in_bounds )
+        return lhs << "label_" << rhs.destination;
+    return lhs << std::format( "${:+}", rhs.destination );
+}
+
+
 inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) {
     if ( rhs.name.empty() )
         lhs << get_mnemonic( rhs.bytes ) << ' ';
@@ -253,24 +275,13 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
         }
 
         switch ( rhs.operands[i].index() ) {
-        case RegisterOperand:
-            lhs << std::get<RegisterOperand>( rhs.operands[i] );
-            break;
-
-        case SegRegOperand:
-            lhs << std::get<SegRegOperand>( rhs.operands[i] );
-            break;
-
-        case AddressOperand:
-            lhs << std::get<AddressOperand>( rhs.operands[i] );
-            break;
-
-        case ImmediateOperand:
-            lhs << std::get<ImmediateOperand>( rhs.operands[i] );
-            break;
-
+        case RegisterOperand:   lhs << std::get<RegisterOperand>( rhs.operands[i] );    break;
+        case SegRegOperand:     lhs << std::get<SegRegOperand>( rhs.operands[i] );      break;
+        case AddressOperand:    lhs << std::get<AddressOperand>( rhs.operands[i] );     break;
+        case ImmediateOperand:  lhs << std::get<ImmediateOperand>( rhs.operands[i] );   break;
+        case JumpOperand:       lhs << std::get<JumpOperand>( rhs.operands[i] );        break;
         default:
-            throw std::exception();
+            throw std::invalid_argument( "Uknown operand type." );
         }
     }
     return lhs;

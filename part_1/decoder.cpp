@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <string>
+#include <variant>
 
 
 /// Converts 1 or 2 bytes into an integer, and advances the instruction pointer beyond the converted bytes.
@@ -269,10 +270,10 @@ Instruction move_r_m_seg( unsigned char const *& instruction ) {
 /// offsets. (All instructions that are decoded by this function are exactly 2 bytes large.)
 /// Also, there is a post-processing step where these offsets are converted into labels if possible.
 Instruction jump_conditional( unsigned char const *& instruction ) {
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    int const offset { get_value( ++instruction, false, true ) };
-
-    return { instruction, std::format( "{} ${:+}", mnemonic, offset + 2 ) };
+    Instruction result { instruction };
+    ++instruction;
+    result.operands[0] = JumpAddress { get_value( instruction, false, true ), false };
+    return result;
 }
 
 
@@ -630,7 +631,6 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
     bool success { true };
     while ( instruction != end ) {
         Instruction result { decode( instruction ) };
-        std::string const result_str { to_string( result ) };
 
         if ( instruction == previous ) {
             assembly.push_back( "The decoder failed to read any data, aborting." );
@@ -638,25 +638,24 @@ bool decode_all( unsigned char const * const instructions, unsigned char const *
         }
 
         // Test for jumps, and record the destination
-        if ( result_str.contains( '$' ) ) {
-            auto const loc { result_str.find_first_of( '$' ) };
-            int const offset { std::stoi( result_str.substr( loc + 1 ) ) };
-            int const label_id ( (previous - instructions) + offset );
+        if ( std::holds_alternative<JumpAddress>( result.operands[0] ) ) {
+            int const current ( instruction - instructions );
+
+            auto & destination { std::get<JumpAddress>( result.operands[0] ) };
+            destination.destination += current;
 
             // Only replace the offset with a label if the destination is within the program.
             // I have no idea whether this is generally true for actual programs, but the
             // challenges do contain some offsets that exceed the size of the program.
             // For these large offsets, the actual destination can still be computed however.
-            if ( label_id <= end - instructions ) {
-                labels.emplace( label_id );
-                result.name = std::format( "{}label_{}", result_str.substr( 0, loc ), label_id );
-            } else {
-                result.name = std::format( "{}{}", result_str.substr( 0, loc ), label_id );
+            if ( destination.destination <= end - instructions ) {
+                labels.emplace( destination.destination );
+                destination.in_bounds = true;
             }
         }
 
         // Collect the generated assembly code
-        assembly.push_back( result_str );
+        assembly.push_back( to_string( result ) );
 
         // Keep track of the consumed bytes
         bytes.emplace_back();
