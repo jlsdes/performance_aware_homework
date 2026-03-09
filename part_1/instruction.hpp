@@ -26,6 +26,9 @@ struct SegmentRegister {
 struct EffectiveAddress {
     Register regs[2];
     int offset;
+
+    bool has_override : 1 { false };
+    unsigned char seg_reg : 2;
 };
 
 
@@ -37,11 +40,19 @@ struct Immediate {
 
 struct JumpAddress {
     int destination;
+    bool is_offset;
     bool in_bounds { false };
 };
 
 
+struct JumpIntersegment {
+    int cs;
+    int ip;
+};
+
+
 using None = std::nullptr_t;
+
 
 using Operand = std::variant<
     None,
@@ -49,8 +60,10 @@ using Operand = std::variant<
     SegmentRegister,
     EffectiveAddress,
     Immediate,
-    JumpAddress
+    JumpAddress,
+    JumpIntersegment
 >;
+
 
 enum OperandTypes {
     NoOperand,
@@ -59,6 +72,7 @@ enum OperandTypes {
     AddressOperand,
     ImmediateOperand,
     JumpOperand,
+    IntersegmentOperand,
 };
 
 
@@ -98,7 +112,6 @@ struct Instruction {
 
     bool write_size { false };
     bool write_far { false };
-    bool is_prefix { false };
 
     /// Basic constructor, optionally sets the name as the mnemonic unless the name is explicitly given.
     Instruction( unsigned char const * instruction, std::string const & name = "" );
@@ -237,11 +250,13 @@ inline std::ostream & operator<<( std::ostream & lhs, SegmentRegister const & rh
 
 
 inline std::ostream & operator<<( std::ostream & lhs, EffectiveAddress const & rhs ) {
+    if ( rhs.has_override )
+        lhs << seg_reg_names[rhs.seg_reg] << ':';
+
     lhs << '[';
 
     if ( not rhs.regs[0].empty )
         lhs << rhs.regs[0];
-
     bool first = rhs.regs[0].empty;
 
     if ( not rhs.regs[1].empty ) {
@@ -266,7 +281,15 @@ inline std::ostream & operator<<( std::ostream & lhs, Immediate const & rhs ) {
 inline std::ostream & operator<<( std::ostream & lhs, JumpAddress const & rhs ) {
     if ( rhs.in_bounds )
         return lhs << "label_" << rhs.destination;
-    return lhs << std::format( "${:+}", rhs.destination );
+    else if ( rhs.is_offset )
+        return lhs << std::format( "${:+}", rhs.destination );
+    else
+        return lhs << rhs.destination;
+}
+
+
+inline std::ostream & operator<<( std::ostream & lhs, JumpIntersegment const & rhs ) {
+    return lhs << rhs.cs << ':' << rhs.ip;
 }
 
 
@@ -293,11 +316,12 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
             lhs << ( *rhs.bytes & 1 ? "word " : "byte " );
 
         switch ( rhs.operands[i].index() ) {
-        case RegisterOperand:   lhs << std::get<RegisterOperand>( rhs.operands[i] );    break;
-        case SegRegOperand:     lhs << std::get<SegRegOperand>( rhs.operands[i] );      break;
-        case AddressOperand:    lhs << std::get<AddressOperand>( rhs.operands[i] );     break;
-        case ImmediateOperand:  lhs << std::get<ImmediateOperand>( rhs.operands[i] );   break;
-        case JumpOperand:       lhs << std::get<JumpOperand>( rhs.operands[i] );        break;
+        case RegisterOperand:       lhs << std::get<RegisterOperand>( rhs.operands[i] );        break;
+        case SegRegOperand:         lhs << std::get<SegRegOperand>( rhs.operands[i] );          break;
+        case AddressOperand:        lhs << std::get<AddressOperand>( rhs.operands[i] );         break;
+        case ImmediateOperand:      lhs << std::get<ImmediateOperand>( rhs.operands[i] );       break;
+        case JumpOperand:           lhs << std::get<JumpOperand>( rhs.operands[i] );            break;
+        case IntersegmentOperand:   lhs << std::get<IntersegmentOperand>( rhs.operands[i] );    break;
         default:
             throw std::invalid_argument( "Uknown operand type." );
         }

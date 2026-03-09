@@ -272,7 +272,8 @@ Instruction move_r_m_seg( unsigned char const *& instruction ) {
 Instruction jump_conditional( unsigned char const *& instruction ) {
     Instruction result { instruction };
     ++instruction;
-    result.operands[0] = JumpAddress { get_value( instruction, false, true ), false };
+    int const destination { get_value( instruction, false, true ) };
+    result.operands[0] = JumpAddress { .destination = destination, .is_offset = true };
     return result;
 }
 
@@ -428,22 +429,23 @@ Instruction direct_intrasegment( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    instruction += sizeof( HeaderByte );
-    int const ip_inc { get_value( instruction, not header->unwide, false ) };
+    Instruction result { instruction };
+    ++instruction;
 
-    return { instruction, std::format( "{} ${:+}", mnemonic, ip_inc + 3 ) };
+    int const destination { get_value( instruction, not header->unwide, false ) };
+    result.operands[0] = JumpAddress { .destination = destination, .is_offset = true };
+    return result;
 }
 
 
 /// Decodes jmp and call instructions that jump a constant distance to another segment.
 Instruction direct_intersegment( unsigned char const *& instruction ) {
-    std::string const mnemonic { get_mnemonic( instruction ) };
+    Instruction result { instruction };
     ++instruction;
     int const ip { get_value( instruction, true, true ) };
     int const cs { get_value( instruction, true, true ) };
-
-    return { instruction, std::format( "{} {}:{}", mnemonic, cs, ip ) };
+    result.operands[0] = JumpIntersegment { cs, ip };
+    return result;
 }
 
 
@@ -452,11 +454,11 @@ Instruction decode( unsigned char const *& instruction );
 
 /// Decodes a lock instruction, which is written as a prefix to the next instruction.
 Instruction prefix( unsigned char const *& instruction ) {
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    ++instruction;
-    std::stringstream stream {};
-    stream << decode( instruction );
-    return { instruction, std::format( "{} {}", mnemonic, stream.str() ) };
+    unsigned char const * const header { instruction };
+    Instruction result { decode( ++instruction ) };
+    result.bytes = header;
+    result.name = get_mnemonic( header ) + ' ' + result.name;
+    return result;
 }
 
 
@@ -469,13 +471,20 @@ Instruction segment_override( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    std::string result { (std::stringstream {} << decode( ++instruction) ).str() };
-    std::string const segment { seg_reg_names[header->seg] + ':' };
+    Instruction result { decode( ++instruction ) };
 
-    // Insert the segment register name right before the memory address, which starts with [
-    auto const mem_location { std::find( result.cbegin(), result.cend(), '[') };
-    result.insert( mem_location, segment.cbegin(), segment.cend() );
-    return { instruction, result };
+    bool success { false };
+    for ( int index { 0 } ; index < 2; ++index ) {
+        if ( std::holds_alternative<EffectiveAddress>( result.operands[index] ) ) {
+            auto & address { std::get<AddressOperand>( result.operands[index] ) };
+            address.has_override = true;
+            address.seg_reg = header->seg;
+            success = true;
+        }
+    }
+    if ( not success )
+        throw std::invalid_argument( "Segment override precedes un-segment-overridable instruction." );
+    return result;
 }
 
 
@@ -644,13 +653,15 @@ void decode_all( unsigned char const * const instructions, unsigned char const *
         if ( std::holds_alternative<JumpAddress>( result.operands[0] ) ) {
             int const current ( instruction - instructions );
 
-            auto & destination { std::get<JumpAddress>( result.operands[0] ) };
-            destination.destination += current;
-
             // Only replace the offset with a label if the destination is within the program.
             // I have no idea whether this is generally true for actual programs, but the
             // challenges do contain some offsets that exceed the size of the program.
             // For these large offsets, the actual destination can still be computed however.
+            auto & destination { std::get<JumpAddress>( result.operands[0] ) };
+            if ( destination.is_offset ) {
+                destination.destination += current;
+                destination.is_offset = false;
+            }
             if ( destination.destination <= end - instructions ) {
                 labels.emplace( destination.destination );
                 destination.in_bounds = true;
