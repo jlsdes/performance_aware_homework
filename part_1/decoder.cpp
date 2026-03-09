@@ -626,7 +626,7 @@ Instruction decode( unsigned char const *& instruction ) {
     if ( decoder )
         return decoder( instruction );
 
-    return Instruction { instruction, std::format( "Unsupported instruction {:#04x}.", *instruction ) };
+    throw std::invalid_argument( std::format( "Unsupported instruction {:#04x}.", *instruction ) );
 }
 
 
@@ -642,7 +642,13 @@ void decode_all( unsigned char const * const instructions, unsigned char const *
     unsigned char const * previous { instructions };
 
     while ( instruction != end ) {
-        Instruction result { decode( instruction ) };
+        Instruction result { instruction };
+        try {
+            result = decode( instruction );
+        } catch ( std::invalid_argument const & exception ) {
+            assembly.push_back( exception.what() );
+            break;
+        }
 
         if ( instruction == previous ) {
             assembly.push_back( "The decoder failed to read any data, aborting." );
