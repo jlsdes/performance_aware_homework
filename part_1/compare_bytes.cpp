@@ -36,8 +36,8 @@ int main( int const argc, char const * const * const argv ) {
     char bytes[2];
 
     for ( unsigned int i { 0 }; i < read_until; ++i ) {
-        files[0] >> bytes[0];
-        files[1] >> bytes[1];
+        files[0].get( bytes[0] );
+        files[1].get( bytes[1] );
 
         if ( bytes[0] != bytes[1] )
             std::println( "Bytes {} have different values ({:#04x}, {:#04x}).", i, bytes[0], bytes[1] );

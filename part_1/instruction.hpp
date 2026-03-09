@@ -98,6 +98,7 @@ struct Instruction {
 
     bool write_size { false };
     bool write_far { false };
+    bool is_prefix { false };
 };
 
 
