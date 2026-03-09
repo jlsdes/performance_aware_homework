@@ -171,7 +171,7 @@ struct ImmToAccumDecoder {
         ++instruction;
         int const value { get_value( instruction, header->w, true ) };
 
-        result.operands[header->d ? 1 : 0] = Register { RegA, header->w };
+        result.operands[header->d ? 1 : 0] = Register { RegAX, header->w };
         result.operands[header->d ? 0 : 1] = address ? Operand { direct_address( value ) }
                                                      : Operand { Immediate ( value, header->w ) };
 
@@ -339,9 +339,9 @@ Instruction in_out( unsigned char const *& instruction ) {
     Instruction result {};
     result.name = get_mnemonic( instruction++ );
 
-    result.operands[header->d] = Register { RegA, bool( header->w ) };
+    result.operands[header->d] = Register { RegAX, bool( header->w ) };
     if ( header->variable )
-        result.operands[1 - header->d] = Register { RegD, true };
+        result.operands[1 - header->d] = Register { RegDX, true };
     else
         result.operands[1 - header->d] = get_immediate( instruction, false, false );
 
@@ -351,7 +351,7 @@ Instruction in_out( unsigned char const *& instruction ) {
 
 /// Decodes instructions that are part of the shift set.
 Instruction shift( unsigned char const *& instruction ) {
-    struct Instruction {
+    struct HeaderBytes {
         // First byte
         unsigned char w : 1;
         unsigned char v : 1;
@@ -361,15 +361,19 @@ Instruction shift( unsigned char const *& instruction ) {
         unsigned char subop : 3;
         unsigned char mod : 2;
     };
-    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+    auto const header { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    instruction += sizeof( Instruction );
-    std::string const source { values->v ? "cl" : "1" };
-    std::string const value_type { values->mod == 0b11 ? "" : values->w ? "word " : "byte " };
-    std::string const destination { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+    Instruction result { instruction };
+    instruction += 2;
+    result.write_size = header->mod != 0b11;
 
-    return { instruction, std::format( "{} {}{}, {}", mnemonic, value_type, destination, source ) };
+    result.operands[0] = get_r_m( header->r_m, header->mod, header->w, instruction );
+    if ( header->v )
+        result.operands[1] = Register { RegCL, 0 };
+    else
+        result.operands[1] = Immediate { 1, false };
+
+    return result;
 }
 
 
@@ -516,7 +520,7 @@ std::array<DecoderFunction, 256> constexpr decoding_table() {
     table[0x8f] = group_r_m;
     // 90 91 92 93 94 95 96 97
     for ( unsigned char i { 0x90 }; i < 0x98; ++i )
-        table[i] = SingleRegDecoder { .has_operand = true, .operand = Register { RegA, 1 } };
+        table[i] = SingleRegDecoder { .has_operand = true, .operand = Register { RegAX, 1 } };
     table[0x98] = MnemonicDecoder {};
     table[0x99] = MnemonicDecoder {};
     table[0x9a] = direct_intersegment;

@@ -63,14 +63,22 @@ enum OperandTypes {
 
 
 enum RegName : unsigned char {
-    RegA,
-    RegC,
-    RegD,
-    RegB,
+    RegAX,
+    RegCX,
+    RegDX,
+    RegBX,
     RegSP,
     RegBP,
     RegSI,
-    RegDI
+    RegDI,
+    RegAL = RegAX,
+    RegCL = RegCX,
+    RegDL = RegDX,
+    RegBL = RegBX,
+    RegAH = RegSP,
+    RegCH = RegBP,
+    RegDH = RegSI,
+    RegBH = RegDI,
 };
 
 
@@ -118,14 +126,14 @@ StringTable<8> constexpr reg_sums {
 
 
 EffectiveAddress constexpr address_sums[8] {
-    { { { RegB, 1 }, { RegSI, 1 } } },
-    { { { RegB, 1 }, { RegDI, 1 } } },
+    { { { RegBX, 1 }, { RegSI, 1 } } },
+    { { { RegBX, 1 }, { RegDI, 1 } } },
     { { { RegBP, 1 }, { RegSI, 1 } } },
     { { { RegBP, 1 }, { RegDI, 1 } } },
     { { { RegSI, 1 }, empty_register } },
     { { { RegDI, 1 }, empty_register } },
     { { { RegBP, 1 }, empty_register } },
-    { { { RegB, 1 }, empty_register } },
+    { { { RegBX, 1 }, empty_register } },
 };
 
 
@@ -273,10 +281,8 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
             lhs << ", ";
         first = false;
 
-        if ( rhs.write_size ) {
-            if ( i == 1 or std::holds_alternative<None>( rhs.operands[1] ) )
-                lhs << ( *rhs.bytes & 1 ? "word " : "byte " );
-        }
+        if ( rhs.write_size and not i )
+            lhs << ( *rhs.bytes & 1 ? "word " : "byte " );
 
         switch ( rhs.operands[i].index() ) {
         case RegisterOperand:   lhs << std::get<RegisterOperand>( rhs.operands[i] );    break;
