@@ -336,7 +336,7 @@ Instruction in_out( unsigned char const *& instruction ) {
     };
     auto const header { reinterpret_cast<HeaderByte const *>( instruction ) };
 
-    Instruction result {};
+    Instruction result { instruction };
     result.name = get_mnemonic( instruction++ );
 
     result.operands[header->d] = Register { RegAX, bool( header->w ) };
@@ -385,17 +385,19 @@ Instruction repeat( unsigned char const *& instruction ) {
     };
     auto const values { reinterpret_cast<SecondByte const *>( instruction + 1 ) };
 
-    std::string const mnemonic { get_mnemonic( instruction++ ) };
-    std::string const name { get_mnemonic( instruction++ ) };
+    std::string const next_mnemonic { get_mnemonic( instruction + 1 ) };
+    char const width_modifier { values->w ? 'w' : 'b' };
 
-    return { instruction, std::format( "{} {}{}", mnemonic, name, values->w ? 'w' : 'b' ) };
+    Instruction result { instruction, std::format( "rep {}{}", next_mnemonic, width_modifier ) };
+    instruction += 2;
+    return result;
 }
 
 
 /// Decodes esc instructions. Apparently nasm doesn't recognise these instructions, so this function has not
 /// been tested at all.
 Instruction escape( unsigned char const *& instruction ) {
-    struct Instruction {
+    struct HeaderBytes {
         // First byte
         unsigned char op1 : 3;
         unsigned char opcode : 5;
@@ -404,15 +406,16 @@ Instruction escape( unsigned char const *& instruction ) {
         unsigned char op2 : 3;
         unsigned char mod : 2;
     };
-    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+    auto const header { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    instruction += sizeof( Instruction );
-    std::string const source { get_r_m_name( values->r_m, values->mod, true, instruction ) };
+    Instruction result { instruction };
+    instruction += 2;
 
-    if ( values->op2 == 0b111 )
-        return { instruction, "esc" };
-    return { instruction, std::format( "esc {}, {}", (values->op1 << 3 | values->op2), source ) };
+    if ( header->op2 != 0b111 )
+        result.operands[0] = Immediate { header->op1 << 3 | header->op2 };
+    result.operands[1] = get_r_m( header->r_m, header->mod, true, instruction );
+
+    return result;
 }
 
 

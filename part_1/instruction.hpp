@@ -99,6 +99,9 @@ struct Instruction {
     bool write_size { false };
     bool write_far { false };
     bool is_prefix { false };
+
+    /// Basic constructor, optionally sets the name as the mnemonic unless the name is explicitly given.
+    Instruction( unsigned char const * instruction, std::string const & name = "" );
 };
 
 
@@ -216,6 +219,10 @@ inline std::string constexpr get_mnemonic( unsigned char const * const instructi
         return mnemonics[*instruction];
     }
 }
+
+
+inline Instruction::Instruction( unsigned char const * const instruction, std::string const & name )
+    : bytes { instruction }, name { name.empty() ? get_mnemonic( instruction ) : name }, operands { None {}, None {} } {}
 
 
 inline std::ostream & operator<<( std::ostream & lhs, Register const & rhs ) {
