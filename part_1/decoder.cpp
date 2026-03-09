@@ -280,7 +280,7 @@ Instruction jump_conditional( unsigned char const *& instruction ) {
 /// Decodes instructions that are part of the group 1 or group 2 sets, and that can operate on either a
 /// register or a memory location.
 Instruction group_r_m( unsigned char const *& instruction ) {
-    struct Instruction {
+    struct HeaderBytes {
         // First byte
         unsigned char w : 1;
         unsigned char opcode : 7;
@@ -289,26 +289,23 @@ Instruction group_r_m( unsigned char const *& instruction ) {
         unsigned char subop : 3;
         unsigned char mod : 2;
     };
-    auto const values { reinterpret_cast<Instruction const *>( instruction ) };
+    auto const header { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
-    std::string const mnemonic { get_mnemonic( instruction ) };
-    instruction += sizeof( Instruction );
-    std::string const r_m { get_r_m_name( values->r_m, values->mod, values->w, instruction ) };
+    bool constexpr jumps[8] { false, false, true, true, true, true, false, false };
+    bool const simple_mod { header->mod == 0b11 };
+    bool const call_or_jmp { header->opcode == 0b111'1111 and jumps[header->subop] };
 
-    bool const simple_mod { values->mod == 0b11 };
-    bool const call_or_jmp { values->opcode == 0b111'1111 and (values->subop & 0b100) ^ ((values->subop & 0b010) << 1) };
+    Instruction result { instruction };
+    instruction += 2;
 
-    std::string value_type {};
-    if ( call_or_jmp )
-        value_type = values->subop & 1 ? "far " : "";
-    else if ( not simple_mod )
-        value_type = values->w ? "word " : "byte ";
+    result.operands[0] = get_r_m( header->r_m, header->mod, header->w, instruction );
+    if ( header->opcode == 0b111'1011 and header->subop == 0b000 ) // Test instruction
+        result.operands[1] = get_immediate( instruction, header->w, true );
 
-    if ( values->opcode == 0b1111'011 and values->subop == 0b000 ) { // Special case: test instruction
-        int const test_value { get_value( instruction, values->w, true ) };
-        return { instruction, std::format( "{} {}{}, {}", mnemonic, value_type, r_m, test_value ) };
-    }
-    return { instruction, std::format( "{} {}{}", mnemonic, value_type, r_m ) };
+    result.write_far = call_or_jmp and (header->subop & 1);
+    result.write_size = not call_or_jmp and not simple_mod;
+
+    return result;
 }
 
 

@@ -89,6 +89,7 @@ struct Instruction {
     Operand operands[2];
 
     bool write_size { false };
+    bool write_far { false };
 };
 
 
@@ -258,6 +259,9 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
         lhs << get_mnemonic( rhs.bytes ) << ' ';
     else
         lhs << rhs.name << ' ';
+
+    if ( rhs.write_far )
+        lhs << "far ";
 
     bool first { true };
 
