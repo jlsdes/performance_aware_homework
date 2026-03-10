@@ -85,14 +85,14 @@ enum RegName : unsigned char {
     RegBP,
     RegSI,
     RegDI,
-    RegAL = RegAX,
-    RegCL = RegCX,
-    RegDL = RegDX,
-    RegBL = RegBX,
-    RegAH = RegSP,
-    RegCH = RegBP,
-    RegDH = RegSI,
-    RegBH = RegDI,
+    RegAH = RegAX,
+    RegAL = RegCX,
+    RegCH = RegDX,
+    RegCL = RegBX,
+    RegDH = RegSP,
+    RegDL = RegBP,
+    RegBH = RegSI,
+    RegBL = RegDI,
 };
 
 

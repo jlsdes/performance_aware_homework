@@ -6,9 +6,9 @@
 #include <print>
 #include <set>
 #include <stdexcept>
-#include <sstream>
 #include <string>
 #include <variant>
+#include <vector>
 
 
 /// Converts 1 or 2 bytes into an integer, and advances the instruction pointer beyond the converted bytes.
@@ -599,7 +599,7 @@ std::array<DecoderFunction, 256> constexpr decoding_table() {
     table[0xfe] = group_r_m;
     table[0xff] = group_r_m;
 
-#if ( 1 )
+#if ( 0 )
     std::println( "; Current table status:" );
     std::println( "; +----------------+" );
     for ( unsigned int row { 0 }; row < 16; ++row ) {
@@ -633,8 +633,10 @@ Instruction decode( unsigned char const *& instruction ) {
 /// Decodes all instructions in the given array, and prints them to the console in assembly language. The
 /// original bytes are also written next to their respective assembly lines as comments. This function returns
 /// a Boolean indicating whether the decoding was a success.
-void decode_all( unsigned char const * const instructions, unsigned char const * const end ) {
-    std::vector<std::string> assembly {};
+std::vector<Instruction> decode_all( unsigned char const * const instructions,
+                                     unsigned char const * const end,
+                                     bool print_instructions ) {
+    std::vector<Instruction> assembly {};
     std::vector<std::string> bytes {};
     std::set<unsigned int> labels {};
 
@@ -646,12 +648,12 @@ void decode_all( unsigned char const * const instructions, unsigned char const *
         try {
             result = decode( instruction );
         } catch ( std::invalid_argument const & exception ) {
-            assembly.push_back( exception.what() );
+            std::println( "An exception was thrown: {}", exception.what() );
             break;
         }
 
         if ( instruction == previous ) {
-            assembly.push_back( "The decoder failed to read any data, aborting." );
+            std::println( "The decoder failed to read any data, aborting." );
             break;
         }
 
@@ -675,13 +677,16 @@ void decode_all( unsigned char const * const instructions, unsigned char const *
         }
 
         // Collect the generated assembly code
-        assembly.push_back( to_string( result ) );
+        assembly.push_back( result );
 
         // Keep track of the consumed bytes
         bytes.emplace_back();
         while ( previous != instruction )
             bytes.back() += std::format( " {:#04x}", *(previous++) );
     }
+
+    if ( not print_instructions )
+        return assembly;
 
     auto label_iter { labels.cbegin() };
     unsigned int byte_counter { 0 };
@@ -695,12 +700,13 @@ void decode_all( unsigned char const * const instructions, unsigned char const *
         }
 
 #if ( 1 ) // Toggle whether the machine code is written as comments next to the generated assembly
-        std::println( "{:40};{:40}< Byte {}", assembly[line], bytes[line], byte_counter );
+        std::println( "{:40};{:40}< Byte {}", to_string( assembly[line] ), bytes[line], byte_counter );
 #else
-        std::println( "{}", assembly[line] );
+        std::println( "{}", to_string( assembly[line] ) );
 #endif
         // All machine code comments are formatted as " 0x__", i.e. length 5
         byte_counter += bytes[line].size() / 5;
     }
+    return assembly;
 }
 
