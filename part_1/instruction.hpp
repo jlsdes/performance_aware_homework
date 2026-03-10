@@ -336,3 +336,23 @@ inline std::string to_string( Instruction const & instruction ) {
     return stream.str();
 }
 
+
+#define FORMATTER( TYPE ) \
+template <> \
+struct std::formatter<TYPE> : std::formatter<std::string> { \
+    inline auto format( TYPE const & operand, format_context & context ) const { \
+        std::stringstream stream {}; \
+        stream << operand; \
+        return std::formatter<std::string>::format( std::format( "{}", stream.str() ), context ); \
+    } \
+};
+
+
+FORMATTER( Register )
+FORMATTER( SegmentRegister )
+FORMATTER( EffectiveAddress )
+FORMATTER( Immediate )
+FORMATTER( JumpAddress )
+FORMATTER( JumpIntersegment )
+FORMATTER( Instruction )
+
