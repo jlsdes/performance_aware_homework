@@ -293,6 +293,20 @@ inline std::ostream & operator<<( std::ostream & lhs, JumpIntersegment const & r
 }
 
 
+inline std::ostream & operator<<( std::ostream & lhs, Operand const & rhs ) {
+    switch ( rhs.index() ) {
+    case RegisterOperand:       return lhs << std::get<RegisterOperand>( rhs );
+    case SegRegOperand:         return lhs << std::get<SegRegOperand>( rhs );
+    case AddressOperand:        return lhs << std::get<AddressOperand>( rhs );
+    case ImmediateOperand:      return lhs << std::get<ImmediateOperand>( rhs );
+    case JumpOperand:           return lhs << std::get<JumpOperand>( rhs );
+    case IntersegmentOperand:   return lhs << std::get<IntersegmentOperand>( rhs );
+    default:
+        throw std::invalid_argument( "Uknown operand type." );
+    }
+}
+
+
 inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) {
     if ( rhs.name.empty() )
         lhs << get_mnemonic( rhs.bytes ) << ' ';
@@ -315,16 +329,7 @@ inline std::ostream & operator<<( std::ostream & lhs, Instruction const & rhs ) 
         if ( rhs.write_size and not i )
             lhs << ( *rhs.bytes & 1 ? "word " : "byte " );
 
-        switch ( rhs.operands[i].index() ) {
-        case RegisterOperand:       lhs << std::get<RegisterOperand>( rhs.operands[i] );        break;
-        case SegRegOperand:         lhs << std::get<SegRegOperand>( rhs.operands[i] );          break;
-        case AddressOperand:        lhs << std::get<AddressOperand>( rhs.operands[i] );         break;
-        case ImmediateOperand:      lhs << std::get<ImmediateOperand>( rhs.operands[i] );       break;
-        case JumpOperand:           lhs << std::get<JumpOperand>( rhs.operands[i] );            break;
-        case IntersegmentOperand:   lhs << std::get<IntersegmentOperand>( rhs.operands[i] );    break;
-        default:
-            throw std::invalid_argument( "Uknown operand type." );
-        }
+        lhs << rhs.operands[i];
     }
     return lhs;
 }
@@ -354,5 +359,6 @@ FORMATTER( EffectiveAddress )
 FORMATTER( Immediate )
 FORMATTER( JumpAddress )
 FORMATTER( JumpIntersegment )
+FORMATTER( Operand )
 FORMATTER( Instruction )
 
