@@ -255,12 +255,12 @@ Instruction move_r_m_seg( unsigned char const *& instruction ) {
         unsigned char zero2 : 1;
         unsigned char mod : 2;
     };
-    auto const values { reinterpret_cast<HeaderBytes const *>( instruction ) };
+    auto const header { reinterpret_cast<HeaderBytes const *>( instruction ) };
 
     Instruction result { instruction };
     instruction += 2;
-    result.operands[0] = get_r_m( values->r_m, values->mod, true, instruction );
-    result.operands[1] = SegmentRegister { values->seg_reg };
+    result.operands[header->d ? 1 : 0] = get_r_m( header->r_m, header->mod, true, instruction );
+    result.operands[header->d ? 0 : 1] = SegmentRegister { header->seg_reg };
     return result;
 }
  
