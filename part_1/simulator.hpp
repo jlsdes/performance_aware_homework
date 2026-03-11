@@ -13,16 +13,18 @@ public:
     void execute( Instruction const & instruction );
     void execute( std::vector<Instruction> const & instructions );
 
-    int get( Operand const & source ) const;
-    int get( Register const & source ) const;
+    unsigned int get( Operand const & memory ) const;
+    unsigned int get( Register const & memory ) const;
+    unsigned int get( SegmentRegister const & memory ) const;
 
-    void set( Operand const & destination, int value );
-    void set( Register const & destination, int value );
+    void set( Operand const & memory, unsigned int value );
+    void set( Register const & memory, unsigned int value );
+    void set( SegmentRegister const & memory, unsigned int value );
 
     friend std::ostream & operator<<( std::ostream & lhs, Simulator const & rhs );
 
 private:
-    short int m_registers[8];
+    unsigned short int m_registers[12];
 };
 
 
