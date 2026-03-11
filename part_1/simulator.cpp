@@ -37,17 +37,37 @@ void Simulator::execute( std::vector<Instruction> const & instructions ) {
 }
 
 
-int Simulator::get( Register const & reg ) const {
+static int get( RegisterMemory const & registers, Register const & reg ) {
     if ( reg.w )
-        return m_registers[reg.base];
+        return registers[reg.base];
     else
-        return reinterpret_cast<char const *>( m_registers )[reg.base];
+        return reinterpret_cast<char const *>( registers )[reg.base];
 }
 
 
-void Simulator::set( Register const & reg, int const value ) {
+static void set( RegisterMemory & registers, Register const & reg, int const value ) {
     if ( reg.w )
-        m_registers[reg.base] = value;
+        registers[reg.base] = value;
     else
-        reinterpret_cast<char *>( m_registers )[reg.base] = value;
+        reinterpret_cast<char *>( registers )[reg.base] = value;
+}
+
+
+int Simulator::get( Operand const & source ) const {
+    switch ( source.index() ) {
+    case RegisterOperand:
+        return ::get( m_registers, std::get<RegisterOperand>( source ) );
+    default:
+        throw std::invalid_argument( "Unsupported source operand." );
+    }
+}
+
+
+void Simulator::set( Operand const & destination, int const value ) {
+    switch ( destination.index() ) {
+    case RegisterOperand:
+        return ::set( m_registers, std::get<RegisterOperand>( destination ), value );
+    default:
+        throw std::invalid_argument( "Unsupported destination operand." );
+    }
 }

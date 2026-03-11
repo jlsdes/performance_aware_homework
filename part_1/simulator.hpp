@@ -6,6 +6,9 @@
 #include <vector>
 
 
+using RegisterMemory = short int[8];
+
+
 class Simulator {
 public:
     Simulator();
@@ -13,13 +16,13 @@ public:
     void execute( Instruction const & instruction );
     void execute( std::vector<Instruction> const & instructions );
 
-    int get( Register const & reg ) const;
-    void set( Register const & reg, int value );
+    int get( Operand const & source ) const;
+    void set( Operand const & destination, int value );
 
     friend std::ostream & operator<<( std::ostream & lhs, Simulator const & rhs );
 
 private:
-    short int m_registers[8];
+    RegisterMemory m_registers;
 };
 
 
